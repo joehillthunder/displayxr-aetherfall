@@ -21,6 +21,7 @@ const FARM_ICON = { valemark: '🌾', ironfang: '🛖', sylvan: '🌙', dread: '
 export function iconFor(def, ent) {
   if (ent?.type === 'mine') return '💰';
   if (ent?.type === 'geyser') return '💠';
+  if (ent?.type === 'rock') return '🪨';
   if (!def) return '?';
   if (def.kind === 'building') return def.type === 'farm' ? FARM_ICON[def.faction] : BLD_ICON[def.type];
   if (def.hero) return HERO_ICON[def.heroId];
@@ -35,7 +36,7 @@ export function iconFor(def, ent) {
   return { worker: '⛏️', melee: '⚔️', ranged: L.weapon === 'rifle' ? '🎯' : L.weapon === 'spear' ? '🔱' : '🏹', caster: '🔮' }[def.role] ?? '⚔️';
 }
 
-const costHtml = (c) => [['💰', c[0]], ['🪵', c[1]], ['💠', c[2]]].filter(([, v]) => v > 0).map(([i, v]) => `<span class="cost">${i} ${v}</span>`).join(' ');
+const costHtml = (c) => [['💰', c[0]], ['🪵', c[1]], ['💠', c[2]], ['🪨', c[3]]].filter(([, v]) => v > 0).map(([i, v]) => `<span class="cost">${i} ${v}</span>`).join(' ');
 
 export class UI {
   constructor({ stage, game, world, fog, audio, canvas }) {
@@ -304,6 +305,7 @@ export class UI {
       this.sel = this.sel.includes(ent) ? this.sel.filter((s) => s !== ent) : [...this.sel, ent].slice(0, 24);
     } else this.sel = [ent];
     this.audio.play('click');
+    if (ent.owner === 0 && ent.type === 'unit') this.audio.voice(ent.def.faction, 'sel', !!ent.def.hero);
     this.refreshSelection();
   }
 
@@ -327,6 +329,7 @@ export class UI {
     if (!list.length) list = this.game.buildings.filter((b) => !b.dead && b.owner === 0 && inBox(b, 1)).slice(0, 1);
     list.sort((a, b) => (b.def.hero ? 1 : 0) - (a.def.hero ? 1 : 0));
     this.sel = d.shift ? [...new Set([...this.sel.filter((s) => s.type === 'unit' && s.owner === 0), ...list])].slice(0, 24) : list.slice(0, 24);
+    if (this.sel[0]?.type === 'unit') this.audio.voice(this.sel[0].def.faction, 'sel', !!this.sel[0].def.hero);
     this.refreshSelection();
   }
 
@@ -340,23 +343,23 @@ export class UI {
     if (!units.length) {
       for (const b of blds) {
         if (!b.def.trains.length && b.def.type !== 'hall') continue;
-        if (ent && (ent.type === 'mine' || ent.def?.type === 'extractor')) b.rally = { x: ent.x, z: ent.z, res: ent.id };
+        if (ent && (ent.type === 'mine' || ent.type === 'rock' || ent.def?.type === 'extractor')) b.rally = { x: ent.x, z: ent.z, res: ent.id };
         else if (tree) b.rally = { x: tree.x, z: tree.z, tree };
         else b.rally = { x: gp.x, z: gp.z };
         this.flash(gp);
       }
       return;
     }
-    if (ent && ent.owner !== 0 && ent.owner !== undefined && ent.type !== 'mine' && ent.type !== 'geyser') {
+    if (ent && ent.owner !== 0 && ent.owner !== undefined && ent.type !== 'mine' && ent.type !== 'geyser' && ent.type !== 'rock') {
       g.order(units, { type: 'attack', target: ent.id });
       this.flash({ x: ent.x, z: ent.z }, 'attack');
-      this.audio.play('order');
+      this.audio.play('order'); this.ack();
       return;
     }
     const workers = units.filter((u) => u.def.worker), others = units.filter((u) => !u.def.worker);
     let workersHandled = false;
     if (workers.length) {
-      if (ent && ent.type === 'mine') { g.order(workers, { type: 'gather', res: ent.id }); workersHandled = true; }
+      if (ent && (ent.type === 'mine' || ent.type === 'rock')) { g.order(workers, { type: 'gather', res: ent.id }); workersHandled = true; }
       else if (ent && (ent.type === 'geyser' || ent.def?.type === 'extractor')) {
         const ex = ent.type === 'geyser' ? g.ents.get(ent.extractor) : ent;
         if (ex && ex.owner === 0 && ex.built) { g.order(workers, { type: 'gather', res: ex.id }); workersHandled = true; }
@@ -372,7 +375,7 @@ export class UI {
     const movers = workersHandled ? others : units;
     if (movers.length) this.groupMove(movers, gp, 'move');
     this.flash(gp);
-    this.audio.play('order');
+    this.audio.play('order'); this.ack();
   }
 
   /** Spread a group around the target point so they don't all fight for one cell. */
@@ -393,6 +396,24 @@ export class UI {
       const p = u.flying ? { x, z } : (this.world.isBlocked(Math.floor(x), Math.floor(z)) ? this.world.nearestOpen(x, z, 3) ?? gp : { x, z });
       this.game.order([u], { type, x: p.x, z: p.z });
     });
+  }
+
+  /** A selected unit answers an order in its race's voice. */
+  ack() {
+    const u = this.myUnits()[0];
+    if (u) this.audio.voice(u.def.faction, 'ok', !!u.def.hero);
+  }
+
+  /** Little rings on the targets a skill sent units to. */
+  flashSkill(units) {
+    const seen = new Set();
+    for (const u of units) {
+      const o = u.order;
+      const t = o.tree ?? this.game.ents.get(o.res ?? o.target);
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      this.flash({ x: t.x, z: t.z }, o.type === 'attack' ? 'attack' : 'move');
+    }
   }
 
   setMode(m) {
@@ -420,7 +441,7 @@ export class UI {
       else if (A.target === 'ally') { if (!ent || ent.owner !== 0 || ent.type !== 'unit') { this.message('Target a friendly unit.', 'warn'); return; } target = ent.id; }
       const err = g.cast(m.caster, m.ab, target);
       if (err) { this.message(err, 'warn'); this.audio.play('error'); }
-      else this.audio.play('order');
+      else this.audio.play('order'); this.ack();
     } else if (m.kind === 'build') {
       const w = this.builderFor(gp);
       if (!w) { this.message('Select a worker.', 'warn'); return; }
@@ -509,7 +530,13 @@ export class UI {
     if (/^[0-9]$/.test(k)) {
       if (e.ctrlKey) { e.preventDefault(); this.groups[k] = this.sel.filter((s) => s.owner === 0).map((s) => s.id); this.message(`Group ${k} set.`); return; }
       const ids = this.groups[k];
-      if (!ids) return;
+      if (!ids) {
+        // no group on this number yet: it triggers the skill with that number (1 chop, 2 mine, 3 rocks, 4 gas, 5 fight)
+        this.card = this.buildCard();
+        const si = this.card.findIndex((c) => c && c.alt === k);
+        if (si >= 0) { e.preventDefault(); this.runCmd(si); }
+        return;
+      }
       const list = ids.map((id) => this.game.ents.get(id)).filter((x) => x && !x.dead);
       if (!list.length) return;
       const now = performance.now();
@@ -581,6 +608,11 @@ export class UI {
       put(11, { key: 'ESCAPE', label: 'Back', icon: '↩', tip: 'Back to the main commands.', run: () => { this.cardMode = 'main'; this.setMode(null); } });
       return cards;
     }
+    const skill = (kind) => () => {
+      const err = g.skill(units, kind);
+      if (err) this.err(err);
+      else { this.audio.voice(units[0].def.faction, 'ok', !!units[0].def.hero); this.flashSkill(units, kind); }
+    };
     put(0, { key: 'M', label: 'Move', icon: '➜', tip: 'Move, ignoring enemies on the way.', run: () => this.setMode({ kind: 'move', hint: 'Click where to move' }) });
     put(1, { key: 'S', label: 'Stop', icon: '■', tip: 'Stop all orders.', run: () => g.order(units, { type: 'idle' }) });
     put(2, { key: 'H', label: 'Hold', icon: '⛉', tip: 'Hold position: fight only what comes into range.', run: () => g.order(units, { type: 'hold' }) });
@@ -601,11 +633,20 @@ export class UI {
         put(4, { key: 'Q', label: A.name, icon: A.icon, mana: A.mana, tip: `${A.desc}<br>Mana ${A.mana}.`, cd: (caster.abil[id] ?? 0) / A.cd, run: () => this.startCast(caster, id) });
       }
     }
+    // every unit can fight: charge the nearest enemy in sight
+    put(7, { key: 'F', alt: '5', label: 'Fight', icon: '⚔️', tip: 'Skill: charge the nearest enemy you can see. Press F or 5.', run: skill('fight') });
     if (workers.length) {
-      put(8, { key: 'G', label: 'Gather', icon: '⛏', tip: 'Harvest gold from a mine, lumber from trees, or aether from your extractor.', run: () => this.setMode({ kind: 'gather', hint: 'Click a gold mine, a tree or your extractor' }) });
+      // worker skills: one key sends every selected worker to the nearest resource of that kind
+      put(4, { key: 'C', alt: '1', label: 'Chop Wood', icon: '🪓', tip: 'Skill: chop the nearest tree for lumber and carry it home. Press C or 1.', run: skill('chop') });
+      put(5, { key: 'G', alt: '2', label: 'Mine Gold', icon: '⛏️', tip: 'Skill: mine gold from the nearest gold mine. Press G or 2.', run: skill('mine') });
+      put(6, { key: 'K', alt: '3', label: 'Gather Rocks', icon: '🪨', tip: 'Skill: quarry stone from the nearest rock pile. Stone builds halls, towers and fortified buildings. Press K or 3.', run: skill('rock') });
+      put(8, { key: 'X', alt: '4', label: 'Capture Gas', icon: '💠', tip: 'Skill: capture aether gas at your nearest extractor (build one on a geyser first). Press X or 4.', run: skill('gas') });
       put(9, { key: 'B', label: 'Build', icon: '🔨', tip: 'Basic structures.', run: () => { this.cardMode = 'build'; this.cardKey = ''; } });
       put(10, { key: 'V', label: 'Advanced', icon: '🏗', tip: 'Advanced structures.', run: () => { this.cardMode = 'build2'; this.cardKey = ''; } });
-      if (workers.some((w) => w.carry)) put(11, { key: 'R', label: 'Return', icon: '↩', tip: 'Carry resources back to the hall.', run: () => { for (const w of workers) if (w.carry) g.order([w], { ...w.order, type: 'gather', phase: 'drop' }); } });
+      put(11, workers.some((w) => w.carry)
+        ? { key: 'R', label: 'Return', icon: '↩', tip: 'Carry resources back to the hall.', run: () => { for (const w of workers) if (w.carry) g.order([w], { ...w.order, type: 'gather', phase: 'drop' }); } }
+        : { key: 'F', alt: '5', label: 'Fight', icon: '⚔️', tip: 'Skill: charge the nearest enemy you can see. Press F or 5.', run: skill('fight') });
+      if (cards[11].label === 'Fight') cards[7] = null;
     }
     return cards;
   }
@@ -639,7 +680,7 @@ export class UI {
       const poor = c.cost && !this.affordable(c);
       const active = this.mode && ((this.mode.kind === 'build' && c.label === buildingDef(this.game.players[0].faction, this.mode.type).name) || (this.mode.kind === 'cast' && c.label === ABILITY[this.mode.ab]?.name) || (this.mode.kind === 'amove' && c.key === 'A') || (this.mode.kind === 'move' && c.key === 'M'));
       return `<button data-i="${i}" class="${c.disabled ? 'off' : ''} ${poor ? 'poor' : ''} ${active ? 'active' : ''} ${c.passive ? 'passive' : ''}">
-        <span class="ic">${c.icon}</span><span class="hk">${c.key === 'ESCAPE' ? 'Esc' : c.key}</span>
+        <span class="ic">${c.icon}</span><span class="hk">${c.key === 'ESCAPE' ? 'Esc' : c.key}${c.alt ? `<em>${c.alt}</em>` : ''}</span>
         ${c.cd > 0 ? `<span class="cdv" style="height:${Math.round(c.cd * 100)}%"></span>` : ''}
         <span class="lb">${c.label}</span></button>`;
     }).join('');
@@ -650,7 +691,7 @@ export class UI {
   showTip(c, el) {
     const tip = $('tip');
     if (!c) { tip.style.display = 'none'; return; }
-    tip.innerHTML = `<b>${c.label}</b> <span class="hk2">[${c.key === 'ESCAPE' ? 'Esc' : c.key}]</span>
+    tip.innerHTML = `<b>${c.label}</b> <span class="hk2">[${c.key === 'ESCAPE' ? 'Esc' : c.key}${c.alt ? ' or ' + c.alt : ''}]</span>
       ${c.cost ? `<div>${costHtml(c.cost)}${c.supply ? ` <span class="cost">👥 ${c.supply}</span>` : ''}</div>` : ''}
       ${c.mana ? `<div><span class="cost mana">◆ ${c.mana} mana</span></div>` : ''}
       <div class="tipd">${c.tip ?? ''}</div>${c.disabled ? `<div class="tipw">${c.disabled}</div>` : ''}`;
@@ -702,7 +743,10 @@ export class UI {
     const e = sel[0];
     const g = this.game;
     let html = '';
-    if (e.type === 'mine' || e.type === 'geyser') {
+    if (e.type === 'rock') {
+      html = `<div class="por">🪨</div><div class="info"><b>${e.name}</b><div class="row">🪨 Stone left: ${fmt(e.amount)}</div>
+        <div class="row small">Workers quarry 10 stone per trip with a pick. Select workers and press K or 3.</div></div>`;
+    } else if (e.type === 'mine' || e.type === 'geyser') {
       html = `<div class="por">${iconFor(null, e)}</div><div class="info"><b>${e.name}</b><div class="row">${e.type === 'mine' ? '💰 Gold' : '💠 Aether'} left: ${fmt(e.amount)}</div>
         <div class="row small">${e.type === 'geyser' ? (e.extractor ? 'An extractor is drawing aether from it.' : 'Build an extractor here, then send workers to it.') : 'Workers carry 10 gold per trip.'}</div></div>`;
     } else if (e.type === 'building') {
@@ -742,7 +786,7 @@ export class UI {
     const o = u.order;
     if (u.owner !== 0) return '';
     switch (o.type) {
-      case 'gather': return o.lumber ? 'Harvesting lumber' : (this.game.ents.get(o.res)?.type === 'mine' ? 'Mining gold' : 'Drawing aether');
+      case 'gather': return o.lumber ? 'Chopping wood' : ({ mine: 'Mining gold', rock: 'Gathering rocks' }[this.game.ents.get(o.res)?.type] ?? 'Capturing aether gas');
       case 'build': return `Going to build ${o.def.name}`;
       case 'construct': return 'Constructing';
       case 'attack': return 'Attacking';
@@ -760,6 +804,7 @@ export class UI {
     $('r-gold').textContent = fmt(p.gold);
     $('r-lumber').textContent = fmt(p.lumber);
     $('r-aether').textContent = fmt(p.aether);
+    $('r-stone').textContent = fmt(p.stone);
     $('r-supply').textContent = `${p.supply}/${p.cap}`;
     $('r-supply').parentElement.classList.toggle('full', p.supply >= p.cap);
     const t = Math.floor(this.game.time);
@@ -879,8 +924,8 @@ export class UI {
     for (const t of w.trees) if (!t.alive) ctx.fillRect(t.cx * S, t.cz * S, S, S);
     for (const r of g.resources) {
       if (r.dead || !this.fog.isExplored(r.x, r.z)) continue;
-      ctx.fillStyle = r.type === 'mine' ? '#ffd040' : (r.great ? '#d0a0ff' : '#5ff0ff');
-      ctx.fillRect((r.x - 1.5) * S, (r.z - 1.5) * S, 3 * S, 3 * S);
+      ctx.fillStyle = r.type === 'mine' ? '#ffd040' : r.type === 'rock' ? '#c8c2b8' : (r.great ? '#d0a0ff' : '#5ff0ff');
+      ctx.fillRect((r.x - r.size / 2) * S, (r.z - r.size / 2) * S, r.size * S, r.size * S);
     }
     for (const b of g.buildings) {
       if (b.dead || !(b.owner === 0 || b.seen)) continue;

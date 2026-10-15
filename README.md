@@ -1,14 +1,14 @@
 # Aetherfall: Realms at War
 
 A classic-style fantasy real-time strategy game for glasses-free 3D. Pick one of five realms and
-one of ten heroes, mine gold, cut lumber, draw glowing aether from geysers, build a town, train an
+one of ten heroes, mine gold, cut lumber, quarry stone, capture glowing aether gas from geysers, build a town, train an
 army and raze every enemy stronghold. In glasses-free 3D on a Leia display through
 [DisplayXR](https://displayxr.org), and in 2D in any browser.
 
 **Play:** https://joehillthunder.github.io/displayxr-aetherfall/
 
 Aetherfall is an original game inspired by the classic real-time strategy genre (base building,
-three resources, hero units, neutral creep camps). Its races, heroes, units, places and lore are
+four resources, hero units, neutral creep camps). Its races, heroes, units, places and lore are
 all its own.
 
 ## Realms and heroes
@@ -34,6 +34,43 @@ tower and the aether extractor. Heroes level up to 6 from kills and unlock an ab
   Build your extractor on the geyser by your base; the plume roars brighter once it's tapped.
   Siege engines (with glowing aether canisters), flyers and spellcasters cost aether. The Great
   Aether Geyser in the middle of the map is guarded by the Aether Wyrm.
+
+- **Stone** from rock piles. Workers quarry it with a pick, out in the open. Halls, towers,
+  barracks and workshops need it.
+
+## Skills
+
+Every character has one-key skills. Select units and press a letter or number:
+
+| Skill | Keys | Who | What happens |
+|---|---|---|---|
+| Chop Wood | `C` or `1` | workers | each worker walks to the nearest tree, chops it and carries the logs home |
+| Mine Gold | `G` or `2` | workers | to the nearest gold mine; they come back with a sack of gold |
+| Gather Rocks | `K` or `3` | workers | to the nearest rock pile; they quarry stone blocks |
+| Capture Gas | `X` or `4` | workers | to your nearest extractor; they come out holding a glowing aether crystal |
+| Fight | `F` or `5` | everyone | charge the nearest enemy in sight |
+
+Workers visibly carry what they gathered. The number keys trigger skills until you assign that
+number to a control group with `Ctrl`+number.
+
+## Sound
+
+Every sound is synthesised live (no audio files), with reverb and left/right panning by where it
+happens on screen. Geysers bubble, hiss and erupt, and a tapped geyser has a pump chugging away;
+axes thock and trees creak and crash; picks clink on rock; gold jingles, logs clunk and aether
+chimes as they're dropped off; swords clang, axes thud, bows twang, rifles crack and cannons
+boom; each spell has its own sound (lightning crackle, shattering ice, a healing choir, falling
+stars). Units answer in their race's voice (gruff orcs, airy elves, whispering undead), birds
+sing by day and crickets by night, and a generative modal tune plays, adding war drums when
+battle is near. `🔊` toggles sound effects and `🎵` the music.
+
+## Graphics
+
+HDR bloom (glowing aether, spells, windows and sigils), a sky reflection map for metal, brick,
+plank, shingle and bark detail on every building, wind-swept grass, drifting cloud shadows,
+depth-tinted water with foam at the shoreline, geyser eruptions that fountain out of the screen,
+fireflies at night, sparks when blades hit armour, and a day/night cycle. The Quality menu (high,
+medium, low) sets bloom, MSAA, shadows, grass density and particle counts.
 
 ## The world
 
@@ -84,6 +121,7 @@ Every model is procedural (no asset files).
 | `js/ai.js` | Computer opponents |
 | `js/ui.js` | Camera, selection, command card, build placement, HUD, minimap |
 | `js/fx.js` | Particles, aether plumes, projectiles, spell effects |
-| `js/fog.js`, `js/path.js`, `js/stage.js`, `js/audio.js` | Fog of war, A*, the DisplayXR stage, synthesised sound |
+| `js/audio.js` | Synthesised sound effects, voices, ambience and generative music |
+| `js/fog.js`, `js/path.js`, `js/stage.js` | Fog of war + surface-detail shaders, A*, the DisplayXR stage with per-eye bloom |
 
 Apache-2.0.

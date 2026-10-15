@@ -55,14 +55,16 @@ export class AI {
 
   economy() {
     const g = this.g;
-    const job = (w) => (w.order.type !== 'gather' ? 'idle' : w.order.lumber ? 'lumber' : g.ents.get(w.order.res)?.type === 'mine' ? 'gold' : 'aether');
-    const counts = { gold: 0, lumber: 0, aether: 0, idle: 0 };
+    const job = (w) => (w.order.type !== 'gather' ? 'idle' : w.order.lumber ? 'lumber' : ({ mine: 'gold', rock: 'stone' }[g.ents.get(w.order.res)?.type] ?? 'aether'));
+    const counts = { gold: 0, lumber: 0, aether: 0, stone: 0, idle: 0 };
     for (const w of this.workers) if (w.order.type === 'gather' || w.order.type === 'idle') counts[job(w)]++;
     const extractor = this.blds.find((b) => b.def.type === 'extractor' && b.built);
-    const want = { gold: 7, lumber: 4 + (this.count('workshop') ? 1 : 0), aether: extractor ? 3 : 0 };
+    const rock = g.nearestRes(this.hall.x, this.hall.z, 'rock', 30);
+    const want = { gold: 7, lumber: 4 + (this.count('workshop') ? 1 : 0), aether: extractor ? 3 : 0, stone: rock ? (this.p.stone < 120 ? 3 : 1) : 0 };
     for (const w of this.workers) {
       if (w.order.type !== 'idle') continue;
-      const need = ['gold', 'lumber', 'aether'].sort((a, b) => (counts[a] - want[a]) - (counts[b] - want[b]))[0];
+      const need = ['gold', 'lumber', 'aether', 'stone'].sort((a, b) => (counts[a] - want[a]) - (counts[b] - want[b]))[0];
+      if (need === 'stone' && rock) { g.order([w], { type: 'gather', res: rock.id }); counts.stone++; continue; }
       if (need === 'gold') {
         const m = g.nearestRes(this.hall.x, this.hall.z, 'mine', 40);
         if (m) { g.order([w], { type: 'gather', res: m.id }); counts.gold++; }
@@ -79,7 +81,11 @@ export class AI {
     }
     if (counts.lumber < want.lumber && counts.gold > 3) {
       const w = spare(), t = w && g.world.nearestTree(this.hall.x, this.hall.z, 30);
-      if (t) g.order([w], { type: 'gather', lumber: true, tree: t });
+      if (t) { g.order([w], { type: 'gather', lumber: true, tree: t }); counts.gold--; }
+    }
+    if (rock && counts.stone < want.stone && counts.gold > 3) {
+      const w = spare();
+      if (w) g.order([w], { type: 'gather', res: rock.id });
     }
     if (this.workers.length < this.D.workers && this.hall.queue.length < 2) g.train(this.hall, 'worker');
     if ((!this.p.hero || this.p.hero.dead) && this.hall.queue.length < 3) g.train(this.hall, 'hero');
@@ -153,6 +159,9 @@ export class AI {
 
   military() {
     const g = this.g, p = this.p;
+    // save up to bring a fallen hero back before spending on more troops
+    const hero = p.hero;
+    if (hero?.dead && p.gold < 200 + (hero.level ?? 1) * 50 + 20) return;
     const prod = this.blds.filter((b) => b.built && b.def.trains.length && b.def.type !== 'hall');
     // save for the next building in the plan early on
     const reserve = this.army.length > 6 ? 0 : 120;

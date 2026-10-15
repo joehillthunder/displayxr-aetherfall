@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { makeNoise, rng, clamp, smooth, lerp } from './util.js';
-import { applyFog, fogUniforms } from './fog.js';
+import { applyFog, fogUniforms, GLSL_NOISE } from './fog.js';
 
 export const N = 128;
 const RES = 2; // height samples per metre
@@ -24,12 +24,6 @@ const EXPANSIONS = [
 ];
 const CENTER = { x: 64, z: 64 };
 
-const GLSL_NOISE = `
-  float fhash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-  float fnoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(fhash(i), fhash(i + vec2(1, 0)), f.x), mix(fhash(i + vec2(0, 1)), fhash(i + vec2(1, 1)), f.x), f.y);
-  }`;
 
 export class World {
   constructor(seed, startStyles) {
@@ -156,6 +150,28 @@ export class World {
       x += (CENTER.x - x) * 0.18; z += (CENTER.z - z) * 0.18;
       this.camps.push({ x, z, creeps: kinds[i % kinds.length] });
     });
+    // rock piles (stone): a few by every base, more out in the wilds
+    this.rocks = [];
+    const r = this.r;
+    const rockOk = (x, z) => this.canPlace(x, z, 2) && this.roadDist(x, z) > 2.5
+      && [...this.mines, ...this.geysers].every((m) => Math.hypot(m.x - x, m.z - z) > 4.5)
+      && this.rocks.every((k) => Math.hypot(k.x - x, k.z - z) > 3.5)
+      && Math.hypot(x - CENTER.x, z - CENTER.z) > 22;
+    for (const s of STARTS) {
+      const out = toCenter(s, -1);
+      let n = 0;
+      for (let tries = 0; tries < 80 && n < 3; tries++) {
+        const a = Math.atan2(out.z, out.x) + (tries % 2 ? 1 : -1) * (1.2 + r() * 0.9);
+        const d = 9 + r() * 3;
+        const x = Math.round(s.x + Math.cos(a) * d), z = Math.round(s.z + Math.sin(a) * d);
+        if (rockOk(x, z) && Math.hypot(x - s.x, z - s.z) > 7) { this.rocks.push({ x, z, amount: 400 }); n++; }
+      }
+    }
+    for (let tries = 0; tries < 400 && this.rocks.length < 34; tries++) {
+      const x = Math.round(r.range(10, N - 10)), z = Math.round(r.range(10, N - 10));
+      if (STARTS.some((s) => Math.hypot(s.x - x, s.z - z) < 13)) continue;
+      if (rockOk(x, z)) this.rocks.push({ x, z, amount: 300 });
+    }
     for (const c of this.camps) {
       // nudge camps onto open ground
       const p = this.nearestOpen(c.x, c.z, 6);
@@ -171,6 +187,7 @@ export class World {
     for (const m of this.mines) keepOut.push({ x: m.x, z: m.z, r: 4 });
     for (const g of this.geysers) keepOut.push({ x: g.x, z: g.z, r: g.great ? 6 : 4 });
     for (const c of this.camps) keepOut.push({ x: c.x, z: c.z, r: 4 });
+    for (const k of this.rocks) keepOut.push({ x: k.x, z: k.z, r: 2.6 });
     keepOut.push({ x: CENTER.x, z: CENTER.z, r: 22 });
     // lumber groves behind each base, so every player has wood close by
     const groves = STARTS.map((s) => {
@@ -267,6 +284,7 @@ export class World {
     this.buildWater();
     this.buildTreeMeshes();
     this.buildRocks();
+    this.buildGrass(quality?.grass ?? 0);
     return this.group;
   }
 
@@ -336,16 +354,72 @@ export class World {
     geo.computeVertexNormals();
     const mat = applyFog(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }), 'terrain', (sh) => {
       sh.fragmentShader = sh.fragmentShader
-        .replace('uniform sampler2D uFog;', 'uniform sampler2D uFog;\n' + GLSL_NOISE)
         .replace('#include <color_fragment>', `#include <color_fragment>
           float gr = fnoise(vWPos.xz * 3.1) * 0.55 + fnoise(vWPos.xz * 11.0) * 0.3 + fnoise(vWPos.xz * 0.6) * 0.3;
-          diffuseColor.rgb *= 0.78 + 0.36 * gr;`);
+          diffuseColor.rgb *= 0.78 + 0.36 * gr;
+          // tiny flowers scattered through the grass
+          float fl = fhash(floor(vWPos.xz * 5.0));
+          if (fl > 0.985 && vWN.y > 0.9) diffuseColor.rgb = mix(diffuseColor.rgb, fl > 0.993 ? vec3(0.95, 0.85, 0.3) : vec3(0.9, 0.55, 0.75), 0.7);`);
     });
+    mat.envMapIntensity = 0.25;
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.name = 'terrain';
     this.terrain = mesh;
     this.group.add(mesh);
+  }
+
+  /** Water depth below y = 0 at each height sample, packed into a byte texture (0..4 m). */
+  depthTexture() {
+    const data = new Uint8Array(HN * HN * 4);
+    for (let i = 0; i < HN * HN; i++) data[i * 4] = Math.round(clamp(-this.h[i] / 4, 0, 1) * 255);
+    const tex = new THREE.DataTexture(data, HN, HN, THREE.RGBAFormat);
+    tex.magFilter = tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  /** Instanced grass blades that sway in the wind (count set by graphics quality). */
+  buildGrass(count) {
+    if (!count) return;
+    const blade = new THREE.BufferGeometry();
+    // two crossed tapered blades
+    const v = [];
+    for (const a of [0, Math.PI / 2]) {
+      const cx = Math.cos(a) * 0.07, cz = Math.sin(a) * 0.07;
+      v.push(-cx, 0, -cz, cx, 0, cz, 0, 0.34, 0);
+    }
+    blade.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+    blade.computeVertexNormals();
+    const mat = applyFog(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, side: THREE.DoubleSide, envMapIntensity: 0.05 }), 'grass', (sh) => {
+      sh.vertexShader = sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+        vec2 ip = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
+        float sway = sin(uTime * 2.1 + ip.x * 0.35 + ip.y * 0.2) * 0.5 + sin(uTime * 3.7 + ip.x) * 0.2;
+        transformed.x += sway * position.y * 0.35;
+        transformed.z += sway * position.y * 0.15;`).replace('#include <common>', '#include <common>\nuniform float uTime;');
+      sh.uniforms.uTime = fogUniforms.uTime;
+    });
+    const im = new THREE.InstancedMesh(blade, mat, count);
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), p = new THREE.Vector3(), c = new THREE.Color();
+    let n = 0;
+    for (let tries = 0; tries < count * 4 && n < count; tries++) {
+      const x = this.r.range(3, N - 3), z = this.r.range(3, N - 3);
+      const b = this.block[Math.floor(z) * N + Math.floor(x)];
+      if (b & (BLOCK.WATER | BLOCK.CLIFF | BLOCK.RESOURCE)) continue;
+      const h = this.heightAt(x, z);
+      if (h < 0.2 || h > 5 || this.roadDist(x, z) < 1.2) continue;
+      if (STARTS.some((s) => Math.hypot(s.x - x, s.z - z) < 5)) continue;
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.r() * 6.28);
+      sc.setScalar(this.r.range(0.6, 1.4));
+      p.set(x, h - 0.02, z);
+      im.setMatrixAt(n, m.compose(p, q, sc));
+      c.setHSL(0.24 + this.r.range(-0.04, 0.05), 0.55, this.r.range(0.14, 0.26));
+      im.setColorAt(n, c);
+      n++;
+    }
+    im.count = n;
+    im.receiveShadow = true;
+    this.group.add(im);
   }
 
   buildWater() {
@@ -355,12 +429,12 @@ export class World {
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      uniforms: { ...fogUniforms, uSun: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, uDay: { value: 1 } },
+      uniforms: { ...fogUniforms, uSun: { value: new THREE.Vector3(0.5, 0.8, 0.3) }, uDay: { value: 1 }, uDepth: { value: this.depthTexture() } },
       vertexShader: `
         uniform float uWorldSize; varying vec3 vW; varying vec2 vFogUv;
         void main() { vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vFogUv = w.xz / uWorldSize; gl_Position = projectionMatrix * viewMatrix * w; }`,
       fragmentShader: `
-        uniform sampler2D uFog; uniform float uTime; uniform vec3 uSun; uniform float uDay; varying vec3 vW; varying vec2 vFogUv;
+        uniform sampler2D uFog; uniform sampler2D uDepth; uniform float uTime; uniform vec3 uSun; uniform float uDay; varying vec3 vW; varying vec2 vFogUv;
         ${GLSL_NOISE}
         void main() {
           vec2 p = vW.xz;
@@ -369,15 +443,21 @@ export class World {
           vec3 n = normalize(vec3((w1 - 0.5) * 0.5 + (w2 - 0.5) * 0.3, 1.0, (w2 - 0.5) * 0.5));
           vec3 v = normalize(cameraPosition - vW);
           float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-          vec3 deep = vec3(0.05, 0.22, 0.32), shallow = vec3(0.16, 0.52, 0.58);
-          vec3 col = mix(deep, shallow, w1 * 0.6 + 0.2);
+          float depth = texture2D(uDepth, vFogUv).r * 4.0; // metres below the surface
+          vec3 deep = vec3(0.03, 0.16, 0.28), shallow = vec3(0.2, 0.62, 0.62);
+          vec3 col = mix(shallow, deep, smoothstep(0.0, 2.2, depth)) * (0.85 + w1 * 0.3);
           col = mix(col, vec3(0.62, 0.78, 0.92) * uDay, fres * 0.55);
           vec3 h = normalize(normalize(uSun) + v);
           col += vec3(1.0, 0.95, 0.8) * pow(max(dot(n, h), 0.0), 140.0) * 1.6 * uDay;
           col += smoothstep(0.78, 0.95, w2) * 0.12;
+          // foam lines that lap at the shore
+          float shore = 1.0 - smoothstep(0.0, 0.55, depth);
+          float lap = sin(depth * 18.0 - uTime * 2.2 + fnoise(p * 1.7) * 4.0) * 0.5 + 0.5;
+          float foam = shore * smoothstep(0.55, 0.9, lap) * (0.6 + 0.4 * fnoise(p * 6.0 + uTime));
+          col = mix(col, vec3(0.92, 0.97, 1.0) * mix(0.5, 1.0, uDay), clamp(foam + shore * shore * 0.35, 0.0, 1.0));
           vec2 fv = texture2D(uFog, vFogUv).rg;
           col *= mix(0.07, mix(0.42, 1.0, fv.r), fv.g);
-          gl_FragColor = vec4(col, 0.82);
+          gl_FragColor = vec4(col, mix(0.55, 0.9, smoothstep(0.0, 1.0, depth)) + foam * 0.3);
           #include <colorspace_fragment>
         }`,
     });
@@ -403,8 +483,8 @@ export class World {
         crown: lumpy(new THREE.IcosahedronGeometry(0.85, 1), 0.15, 9).scale(0.9, 1.3, 0.9).translate(0, 2.6, 0), color: 0x6a8a5a,
       },
     ];
-    const trunkMat = applyFog(new THREE.MeshStandardMaterial({ color: 0x5a3e28, roughness: 0.9 }), 'tree');
-    const crownMat = applyFog(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }), 'tree');
+    const trunkMat = applyFog(new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.9 }), 'trunk', null, { pat: 'bark' });
+    const crownMat = applyFog(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true }), 'crown', null, { grain: true });
     this.treeMeshes = species.map((sp, k) => {
       const list = this.trees.filter((t) => t.type === k);
       const trunks = new THREE.InstancedMesh(sp.trunk, trunkMat, Math.max(1, list.length));

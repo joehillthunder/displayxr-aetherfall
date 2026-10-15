@@ -2,28 +2,28 @@
 //
 // Units share seven roles (worker, melee, ranged, cavalry, caster, siege, flyer) with base stats.
 // Each faction tilts those stats with its own modifiers, so the five races play differently while
-// the balance stays readable. Costs are [gold, lumber, aether].
+// the balance stays readable. Costs are [gold, lumber, aether, stone]; stone is optional (0).
 
-export const RES = ['gold', 'lumber', 'aether'];
+export const RES = ['gold', 'lumber', 'aether', 'stone'];
 
 const ROLE = {
   worker:  { hp: 220, armor: 0, dmg: 6,  range: 0.9, cd: 1.4, speed: 3.3, sight: 7,  cost: [75, 0, 0],      supply: 1, time: 12 },
   melee:   { hp: 440, armor: 2, dmg: 13, range: 1.0, cd: 1.3, speed: 3.0, sight: 8,  cost: [135, 0, 0],     supply: 2, time: 16 },
   ranged:  { hp: 300, armor: 0, dmg: 17, range: 6.5, cd: 1.5, speed: 3.0, sight: 9,  cost: [130, 20, 0],    supply: 2, time: 17, proj: 'arrow' },
-  cavalry: { hp: 760, armor: 3, dmg: 26, range: 1.3, cd: 1.4, speed: 4.4, sight: 9,  cost: [245, 60, 0],    supply: 4, time: 24 },
+  cavalry: { hp: 760, armor: 3, dmg: 26, range: 1.3, cd: 1.4, speed: 4.4, sight: 9,  cost: [245, 60, 0, 10],    supply: 4, time: 24 },
   caster:  { hp: 320, armor: 0, dmg: 9,  range: 6.0, cd: 1.8, speed: 3.0, sight: 9,  cost: [150, 30, 40],   supply: 2, time: 20, mana: 200, proj: 'bolt' },
-  siege:   { hp: 650, armor: 2, dmg: 70, range: 10,  cd: 3.5, speed: 2.2, sight: 10, cost: [220, 60, 75],   supply: 3, time: 30, proj: 'boulder', splash: 2.2, bldBonus: 2.5 },
+  siege:   { hp: 650, armor: 2, dmg: 70, range: 10,  cd: 3.5, speed: 2.2, sight: 10, cost: [220, 60, 75, 30],   supply: 3, time: 30, proj: 'boulder', splash: 2.2, bldBonus: 2.5 },
   flyer:   { hp: 520, armor: 1, dmg: 22, range: 3.5, cd: 1.6, speed: 5.0, sight: 11, cost: [260, 40, 100],  supply: 4, time: 30, flying: true, proj: 'bolt' },
 };
 export const ROLES = Object.keys(ROLE);
 
 const BUILD = {
-  hall:      { hp: 1700, size: 4, cost: [385, 185, 0], time: 60, supply: 15, trains: ['worker'], dropoff: true, sight: 12, armor: 5 },
+  hall:      { hp: 1700, size: 4, cost: [385, 185, 0, 60], time: 60, supply: 15, trains: ['worker'], dropoff: true, sight: 12, armor: 5 },
   farm:      { hp: 500,  size: 2, cost: [80, 20, 0],   time: 20, supply: 8, sight: 6, armor: 5 },
-  barracks:  { hp: 1200, size: 3, cost: [160, 60, 0],  time: 35, trains: ['melee', 'ranged', 'cavalry'], sight: 8, armor: 5 },
-  sanctum:   { hp: 900,  size: 3, cost: [150, 100, 0], time: 35, trains: ['caster', 'flyer'], requires: ['barracks'], sight: 8, armor: 5 },
-  workshop:  { hp: 900,  size: 3, cost: [140, 140, 0], time: 35, trains: ['siege'], research: ['weapons', 'armor'], requires: ['barracks'], sight: 8, armor: 5 },
-  tower:     { hp: 650,  size: 2, cost: [110, 80, 0],  time: 25, sight: 11, armor: 5, attack: { dmg: 22, range: 8.5, cd: 1.3, proj: 'arrow' } },
+  barracks:  { hp: 1200, size: 3, cost: [160, 60, 0, 20],  time: 35, trains: ['melee', 'ranged', 'cavalry'], sight: 8, armor: 5 },
+  sanctum:   { hp: 900,  size: 3, cost: [150, 100, 0, 20], time: 35, trains: ['caster', 'flyer'], requires: ['barracks'], sight: 8, armor: 5 },
+  workshop:  { hp: 900,  size: 3, cost: [140, 140, 0, 40], time: 35, trains: ['siege'], research: ['weapons', 'armor'], requires: ['barracks'], sight: 8, armor: 5 },
+  tower:     { hp: 650,  size: 2, cost: [110, 80, 0, 50],  time: 25, sight: 11, armor: 5, attack: { dmg: 22, range: 8.5, cd: 1.3, proj: 'arrow' } },
   extractor: { hp: 750,  size: 3, cost: [100, 50, 0],  time: 25, onGeyser: true, sight: 7, armor: 5 },
 };
 export const BUILD_ORDER = ['hall', 'farm', 'barracks', 'extractor', 'sanctum', 'workshop', 'tower'];

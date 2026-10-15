@@ -13,6 +13,10 @@
 import * as THREE from 'three';
 import { createInline3D, inline3dDisplayModesSupported } from '@displayxr/inline3d';
 import { EyeCamera, cameraRigFromCamera } from '@displayxr/inline3d/three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { clamp } from './util.js';
 
 const MIN_CONVERGENCE = 0.6; // metres; comfort floor for the zero-disparity plane
@@ -165,9 +169,39 @@ export class Stage {
       r.setViewport(vp.x, vp.y, vp.width, vp.height);
       r.setScissor(vp.x, vp.y, vp.width, vp.height);
       this.eyes[i].setLocalFromView(views[i]);
-      r.render(this.scene, this.eyes[i].camera);
+      this.renderEye(this.eyes[i].camera, vp);
     }
     r.setScissorTest(false);
+  }
+
+  /**
+   * Draw one eye (or the mono view) into the current viewport. With bloom on, the scene renders
+   * into an HDR target and the composer's last pass writes into this viewport and scissor, which
+   * is the pattern the music visualizer uses on the panel. Both eyes are the same size, so the
+   * composer is rebuilt only when the size or the settings change.
+   */
+  renderEye(camera, vp) {
+    const P = this.post;
+    if (!P?.enabled) { this.renderer.render(this.scene, camera); return; }
+    const key = `${vp.width}x${vp.height}:${P.samples}`;
+    if (key !== this.composerKey) {
+      this.composerKey = key;
+      this.composer?.dispose?.();
+      const rt = new THREE.WebGLRenderTarget(vp.width, vp.height, { type: THREE.HalfFloatType, samples: P.samples });
+      this.composer = new EffectComposer(this.renderer, rt);
+      this.composer.setPixelRatio(1);
+      this.renderPass = new RenderPass(this.scene, camera);
+      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(vp.width, vp.height), P.strength, P.radius, P.threshold);
+      this.composer.addPass(this.renderPass);
+      this.composer.addPass(this.bloomPass);
+      this.composer.addPass(new OutputPass());
+      this.composer.setSize(vp.width, vp.height);
+    }
+    this.bloomPass.strength = P.strength;
+    this.bloomPass.radius = P.radius;
+    this.bloomPass.threshold = P.threshold;
+    this.renderPass.camera = camera;
+    this.composer.render();
   }
 
   monoLoop() {
@@ -181,7 +215,7 @@ export class Stage {
       r.shadowMap.needsUpdate = true;
       r.setViewport(0, 0, this.canvas.width, this.canvas.height);
       r.clear();
-      r.render(this.scene, this.cam);
+      this.renderEye(this.cam, { x: 0, y: 0, width: this.canvas.width, height: this.canvas.height });
     };
     requestAnimationFrame(loop);
   }

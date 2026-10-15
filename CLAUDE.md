@@ -29,10 +29,10 @@ SDK) that also runs in 2D in any browser. Live at https://joehillthunder.github.
 | `js/ai.js` | Computer opponents (economy, build plan, army mix, creeping, waves) |
 | `js/ui.js` | Camera, picking, selection, command card, build ghost, HUD panels, minimap |
 | `js/fx.js` | Point particles, aether plumes, projectiles, spell effects |
-| `js/fog.js` | Fog-of-war grid + `applyFog(material)` shader injection used by every world material |
+| `js/fog.js` | Fog-of-war grid + `applyFog(material, key, extra, { grain, pat })`: fog, cloud shadows, brick/plank/shingle/bark patterns |
 | `js/path.js` | Grid A* (8-way, 16384-node cap) with line-of-sight smoothing |
 | `js/stage.js` | DisplayXR stage: woven `addScene` with a camera rig (attach pattern), mono fallback |
-| `js/audio.js` | Synthesised WebAudio sound effects |
+| `js/audio.js` | Synthesised audio: SFX library, race voices, ambience, generative music (reverb + panning) |
 
 ## How things fit
 
@@ -89,3 +89,16 @@ The game has a room in the Arcade wing of https://joehillthunder.github.io/ (rep
 `joehillthunder/joehillthunder.github.io`: `home/demos.js` entry `aetherfall` and the
 `aetherfall` set piece in `home/office.js`). That checkout is shared with other sessions; edit it
 from your own git worktree based on `origin/main` and don't touch others' uncommitted changes.
+
+## Skills, stone and sound hooks
+
+- Costs are `[gold, lumber, aether, stone]`; the stone slot is optional (`cost[3] ?? 0`).
+- One-key skills live in `game.skill(units, kind)` (`chop`, `mine`, `rock`, `gas`, `fight`). The
+  command card gives skill buttons an `alt` digit; digits trigger skills only when no control group
+  is stored on that number.
+- Sounds are played with `audio.play(name, entityOrPoint, opts)` and defined in the `SOUNDS` table in
+  `js/audio.js`; `launchSound`, `meleeSound`, `deathVoice` and `spellSound` at the bottom of
+  `js/game.js` choose them. Keep oscillator partials under ~16 kHz (browsers clamp at 24 kHz and
+  warn). Unit voices are `audio.voice(faction, 'sel' | 'ok', hero)`.
+- Bloom runs per eye through `stage.renderEye`; `stage.post` comes from the Quality preset in
+  `main.js`. Keep emissive intensities moderate (about 1–2.5) or plumes bloom to white.

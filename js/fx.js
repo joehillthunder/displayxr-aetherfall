@@ -22,7 +22,7 @@ const FRAG_ADD = `
   void main() {
     vec2 c = gl_PointCoord - 0.5; float d = length(c);
     float a = smoothstep(0.5, 0.0, d); a *= a;
-    gl_FragColor = vec4(vColor * a * vAlpha * 1.4, 1.0);
+    gl_FragColor = vec4(vColor * a * vAlpha, 1.0);
     #include <colorspace_fragment>
   }`;
 const FRAG_ALPHA = `
@@ -157,7 +157,7 @@ export class FX {
           const a = Math.random() * 6.28, r = Math.random() * (e.great ? 0.6 : 0.35);
           const up = (e.great ? 3.2 : 2.2) * (0.7 + Math.random() * 0.6) * (0.6 + e.strength * 0.4);
           const col = e.great ? (Math.random() < 0.5 ? 0xc89aff : 0x8ff0ff) : (Math.random() < 0.7 ? 0x6fe8ff : 0xd8ffff);
-          g.spawn(e.x + Math.cos(a) * r, e.y, e.z + Math.sin(a) * r, Math.cos(a) * 0.35, up, Math.sin(a) * 0.35, col, e.great ? 0.5 : 0.34, 1.6 + Math.random() * 1.2, -0.2, 1.4, 2.2);
+          g.spawn(e.x + Math.cos(a) * r, e.y, e.z + Math.sin(a) * r, Math.cos(a) * 0.35, up, Math.sin(a) * 0.35, col, e.great ? 0.4 : 0.26, 1.6 + Math.random() * 1.2, -0.2, 1.4, 2.2);
         }
         if (Math.random() < dt * 4 * d) g.spawn(e.x, e.y + 0.1, e.z, 0, 1.2, 0, e.great ? 0xd8c0ff : 0xc8ffff, e.great ? 0.9 : 0.6, 0.5, 0, 0.6);
       } else if (e.kind === 'smoke') {
@@ -172,6 +172,36 @@ export class FX {
           if (Math.random() < 0.3) s.spawn(e.x, e.y + 0.6, e.z, 0.1, 0.9, 0, 0x3a3a3a, 0.5, 2.2, -0.05, 2);
         }
       }
+    }
+  }
+
+  /** A geyser erupts: a fountain of aether that shoots out of the screen in 3D and rains back down. */
+  erupt(x, y, z, great, tapped) {
+    const g = this.glow, d = this.density;
+    const n = Math.round((great ? 220 : 130) * d);
+    const h = great ? 13 : tapped ? 7 : 10;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.28, r = Math.random() * (great ? 0.7 : 0.4);
+      const up = h * (0.55 + Math.random() * 0.5);
+      const spread = 0.6 + Math.random() * 1.6;
+      const col = great ? (Math.random() < 0.5 ? 0xc89aff : Math.random() < 0.5 ? 0x8ff0ff : 0xffffff) : (Math.random() < 0.75 ? 0x6fe8ff : 0xe8ffff);
+      g.spawn(x + Math.cos(a) * r, y, z + Math.sin(a) * r, Math.cos(a) * spread, up, Math.sin(a) * spread, col, (great ? 0.5 : 0.38) * (0.6 + Math.random() * 0.8), 1.6 + Math.random() * 1.2, 7.5, 0.4, 1.2);
+    }
+    // the steam cloud and a shock ring on the ground
+    for (let i = 0; i < 14 * d; i++) { const a = Math.random() * 6.28; this.smoke.spawn(x, y + 0.5, z, Math.cos(a) * 1.4, 2 + Math.random() * 2, Math.sin(a) * 1.4, 0xbfe8f0, 0.9, 2.4, -0.2, 2.5); }
+    this.ring(x, y, z, great ? 5 : 3, great ? 0xc89aff : 0x6fe8ff, 0.9);
+    this.column(x, y, z, great ? 0xd8b8ff : 0xaff4ff, h * 0.6, 0.7, great ? 0.7 : 0.45);
+  }
+
+  /** Fireflies drifting over the forests at night. */
+  fireflies(cx, cz, night, dt) {
+    if (night < 0.3) return;
+    this.ffAcc = (this.ffAcc ?? 0) + dt * 18 * night * this.density;
+    while (this.ffAcc > 1) {
+      this.ffAcc -= 1;
+      const x = cx + (Math.random() - 0.5) * 50, z = cz + (Math.random() - 0.5) * 40;
+      const y = this.world.surfaceAt(x, z) + 0.4 + Math.random() * 2.5;
+      this.glow.spawn(x, y, z, (Math.random() - 0.5) * 0.5, (Math.random() - 0.3) * 0.3, (Math.random() - 0.5) * 0.5, Math.random() < 0.7 ? 0xd8ff6a : 0xffe08a, 0.16, 3 + Math.random() * 3, 0, 0.3, 1.5);
     }
   }
 

@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { unitDef, buildingDef, heroDef, creepDef, ABILITY, RESEARCH, HERO_XP, FACTIONS, HEROES, TEAM_COLORS } from './data.js';
-import { makeUnitModel, makeBuildingModel, makeGoldMine, makeGeyser, makeRing, makeHealthBar } from './models.js';
+import { makeUnitModel, makeBuildingModel, makeGoldMine, makeGeyser, makeRockPile, makeRing, makeHealthBar } from './models.js';
 import { findPath } from './path.js';
 import { BLOCK, STARTS } from './world.js';
 import { clamp, dist, angleTo, angleDiff } from './util.js';
@@ -38,13 +38,14 @@ export class Game {
     // players: 0 is the human, then the AI opponents
     this.players = setup.players.map((p, i) => ({
       id: i, faction: p.faction, heroId: p.hero, ai: i !== 0, color: TEAM_COLORS[i], start: STARTS[p.start],
-      gold: 500, lumber: 200, aether: 0, supply: 0, cap: 0, alive: true, upgrades: { weapons: 0, armor: 0 },
+      gold: 500, lumber: 200, aether: 0, stone: 150, supply: 0, cap: 0, alive: true, upgrades: { weapons: 0, armor: 0 },
       difficulty: p.difficulty ?? 'normal', hero: null,
-      stats: { unitsTrained: 0, unitsLost: 0, kills: 0, gold: 0, lumber: 0, aether: 0, buildings: 0 },
+      stats: { unitsTrained: 0, unitsLost: 0, kills: 0, gold: 0, lumber: 0, aether: 0, stone: 0, buildings: 0 },
     }));
     this.root = new THREE.Group();
     scene.add(this.root);
     this.spawnResources();
+    this.spawnRocks();
     for (const p of this.players) this.spawnStart(p);
     this.spawnCreeps();
     this.recountSupply();
@@ -66,9 +67,22 @@ export class Game {
       e.model = makeGeyser(g.great);
       this.place(e);
       e.plume = this.fx.addPlume(e.x, e.y + 0.15, e.z, { great: g.great });
+      e.eruptT = 4 + Math.random() * 10;
       w.setFootprint(e.x, e.z, 3, BLOCK.RESOURCE, e.id);
       this.resources.push(e);
     }
+  }
+
+  spawnRocks() {
+    const w = this.world;
+    w.rocks.forEach((k, i) => {
+      const e = this.addEnt({ type: 'rock', owner: NEUTRAL, x: k.x, z: k.z, size: 2, amount: k.amount, maxAmount: k.amount, hp: 1, maxHp: 1, name: 'Rock Pile' });
+      e.model = makeRockPile(i + 1);
+      e.model.rotation.y = i * 1.7;
+      this.place(e);
+      w.setFootprint(e.x, e.z, 2, BLOCK.RESOURCE, e.id);
+      this.resources.push(e);
+    });
   }
 
   spawnStart(p) {
@@ -201,14 +215,15 @@ export class Game {
   }
 
   // ── players and economy ─────────────────────────────────────────────────────────────────────────
-  canAfford(pid, cost) { const p = this.players[pid]; return p.gold >= cost[0] && p.lumber >= cost[1] && p.aether >= cost[2]; }
-  pay(pid, cost) { const p = this.players[pid]; p.gold -= cost[0]; p.lumber -= cost[1]; p.aether -= cost[2]; }
-  refund(pid, cost, k = 1) { const p = this.players[pid]; p.gold += Math.floor(cost[0] * k); p.lumber += Math.floor(cost[1] * k); p.aether += Math.floor(cost[2] * k); }
+  canAfford(pid, cost) { const p = this.players[pid]; return p.gold >= cost[0] && p.lumber >= cost[1] && p.aether >= cost[2] && p.stone >= (cost[3] ?? 0); }
+  pay(pid, cost) { const p = this.players[pid]; p.gold -= cost[0]; p.lumber -= cost[1]; p.aether -= cost[2]; p.stone -= cost[3] ?? 0; }
+  refund(pid, cost, k = 1) { const p = this.players[pid]; p.gold += Math.floor(cost[0] * k); p.lumber += Math.floor(cost[1] * k); p.aether += Math.floor(cost[2] * k); p.stone += Math.floor((cost[3] ?? 0) * k); }
   missing(pid, cost) {
     const p = this.players[pid];
     if (p.gold < cost[0]) return 'Not enough gold.';
     if (p.lumber < cost[1]) return 'Not enough lumber.';
     if (p.aether < cost[2]) return 'Not enough aether.';
+    if (p.stone < (cost[3] ?? 0)) return 'Not enough stone.';
     return null;
   }
 
@@ -256,6 +271,7 @@ export class Game {
   carryTypeFor(r) {
     if (!r) return null;
     if (r.type === 'mine') return 'gold';
+    if (r.type === 'rock') return 'stone';
     if (r.type === 'geyser' || r.def?.type === 'extractor') return 'aether';
     if (r.tree) return 'lumber';
     return null;
@@ -357,6 +373,16 @@ export class Game {
     for (const b of this.buildings) if (!b.dead) this.updateBuilding(b, dt);
     this.updateDead(dt);
     this.world.updateTrees(dt);
+    this.heat = Math.max(0, (this.heat ?? 0) - dt * 0.12);
+    for (const g of this.resources) {
+      if (g.type !== 'geyser' || g.dead) continue;
+      g.eruptT -= dt;
+      if (g.eruptT <= 0) {
+        g.eruptT = (g.great ? 9 : 13) + Math.random() * 12;
+        this.fx.erupt(g.x, g.y + 0.2, g.z, g.great, !!g.extractor);
+        if (this.fog.isExplored(g.x, g.z)) this.audio?.play('erupt', g, { key: g.id });
+      }
+    }
     this.checkVictT = (this.checkVictT ?? 0) - dt;
     if (this.checkVictT <= 0) { this.checkVictT = 1; this.checkVictory(); }
   }
@@ -660,12 +686,17 @@ export class Game {
         const e = this.ents.get(tid);
         if (u.def.splash) this.splash(u, p.x, p.z, u.def.splash, dmg, e);
         else if (e && !e.dead) this.damage(u, e, dmg);
+        if (this.fog.visible(p.x, p.z)) this.audio?.play(proj === 'boulder' || proj === 'breath' ? 'boom' : proj === 'bolt' || proj === 'glaive' ? 'zap' : 'thunk', p);
       }, color);
-      if (this.visibleToPlayer(u)) this.audio?.play(proj === 'bullet' || proj === 'boulder' ? 'boom' : 'shoot', u);
+      if (this.visibleToPlayer(u)) this.audio?.play(launchSound(u, proj), u);
     } else {
       if (u.def.splash) this.splash(u, t.x, t.z, u.def.splash, dmg, t);
       else this.damage(u, t, dmg);
-      if (this.visibleToPlayer(u)) this.audio?.play('hit', u);
+      if (this.visibleToPlayer(u)) {
+        const snd = meleeSound(u, t);
+        this.audio?.play(snd, t);
+        if (snd === 'clang') this.fx.burst(t.x, t.y + this.hitHeight(t), t.z, 0xffd080, 6, 2.5, 0.08, 0.25, 6);
+      }
     }
   }
 
@@ -705,6 +736,7 @@ export class Game {
       this.audio?.play('alert');
     }
     if (t.owner !== NEUTRAL && src && src.owner !== t.owner) this.onEvent('attacked', { victim: t, src });
+    if (src && (t.owner === 0 || src.owner === 0)) this.heat = Math.min(1, (this.heat ?? 0) + 0.04);
     if (t.hp <= 0) this.kill(t, src);
   }
 
@@ -719,7 +751,7 @@ export class Game {
     t.deadT = 0;
     t.hp = 0;
     if (t.type === 'building') return this.destroy(t, src);
-    if (this.visibleToPlayer(t)) this.audio?.play('die', t);
+    if (this.visibleToPlayer(t)) this.audio?.play('die', t, deathVoice(t.def));
     this.unhide(t);
     t.bar.visible = false;
     if (t.ring) t.ring.visible = false;
@@ -829,8 +861,9 @@ export class Game {
           p[u.carry.res] += amt;
           p.stats[u.carry.res] += amt;
           if (u.owner === 0) this.onEvent('income', { res: u.carry.res, amt, x: hall.x, z: hall.z });
+          if (u.owner === 0) this.audio?.play({ gold: 'coins', lumber: 'woodstack', aether: 'crystal', stone: 'stones' }[u.carry.res] ?? 'coins', hall);
           u.carry = null;
-          u.model.carry && (u.model.carry.visible = false);
+          u.model.setCarry(null);
         }
         o.phase = 'go';
         u.path = null;
@@ -861,7 +894,9 @@ export class Game {
         if (u.workT >= 4.5) {
           u.workT = 0;
           this.world.chopTree(tree, 10);
+          if (!tree.alive && this.fog.visible(tree.x, tree.z)) this.audio?.play('timber', tree);
           u.carry = { res: 'lumber', amt: 10 };
+          u.model.setCarry('lumber');
           o.phase = 'drop';
           u.path = null;
         }
@@ -874,11 +909,13 @@ export class Game {
     if (!r || r.dead) {
       // mine ran out or extractor gone: look for another of the same kind nearby
       const kind = o.kind ?? 'mine';
-      const alt = kind === 'mine' ? this.nearestRes(u.x, u.z, 'mine', 30) : null;
+      const alt = kind === 'mine' || kind === 'rock' ? this.nearestRes(u.x, u.z, kind, 30) : null;
       if (alt) { o.res = alt.id; return; }
       u.order = { type: 'idle' }; this.unhide(u); return;
     }
+    if (r.type === 'rock') return this.doQuarry(u, o, r, dt);
     o.kind = r.type === 'mine' ? 'mine' : 'aether';
+    if (u.hidden && o.kind === 'mine' && Math.random() < dt * 2.5 && this.fog.visible(r.x, r.z)) this.audio?.play('pick', r);
     if (u.hidden) {
       u.workT += dt;
       if (u.workT >= (o.kind === 'mine' ? 1.6 : 1.2)) {
@@ -889,6 +926,8 @@ export class Game {
           if (src.amount <= 0 && r.type === 'mine') this.exhaustMine(src);
         }
         u.carry = { res: o.kind === 'mine' ? 'gold' : 'aether', amt };
+        u.model.setCarry(u.carry.res);
+        if (o.kind !== 'mine' && this.visibleToPlayer(u)) this.audio?.play('aether', u);
         this.unhide(u);
         const hall = this.dropoffFor(u);
         // pop out on the side facing the hall
@@ -910,6 +949,85 @@ export class Game {
       return;
     }
     this.moveTo(u, r.x, r.z, dt, 0);
+  }
+
+  /** Quarry stone from a rock pile, out in the open with a pick. */
+  doQuarry(u, o, r, dt) {
+    o.kind = 'rock';
+    if (this.edgeDist(u, r) <= 0.7) {
+      if (u.carry && u.carry.amt) { o.phase = 'drop'; return; }
+      u.anim.work = true;
+      this.faceTo(u, r.x, r.z, dt);
+      const before = u.workT ?? 0;
+      u.workT = before + dt;
+      if (Math.floor(before * 1.6) !== Math.floor(u.workT * 1.6)) {
+        if (this.visibleToPlayer(u)) this.audio?.play('pick', u);
+        this.fx.burst(r.x + (u.x - r.x) * 0.4, r.y + 0.5, r.z + (u.z - r.z) * 0.4, 0xd8d0c0, 4, 1.5, 0.08, 0.3, 6);
+      }
+      if (u.workT >= 3.8) {
+        u.workT = 0;
+        r.amount -= 10;
+        r.model.userData.setAmount?.(r.amount / r.maxAmount);
+        u.carry = { res: 'stone', amt: 10 };
+        u.model.setCarry('stone');
+        o.phase = 'drop';
+        u.path = null;
+        if (r.amount <= 0) this.exhaustRock(r);
+      }
+      return;
+    }
+    this.moveTo(u, r.x, r.z, dt, 0);
+  }
+
+  exhaustRock(r) {
+    r.dead = true;
+    this.world.setFootprint(r.x, r.z, 2, BLOCK.RESOURCE);
+    this.root.remove(r.model);
+    this.fx.dust(r.x, r.y, r.z, 16, 0x9a948a);
+    if (this.fog.visible(r.x, r.z)) this.audio?.play('collapse', r);
+  }
+
+  /**
+   * One-key skills. kind: chop | mine | rock | gas (workers go to the nearest tree, gold mine,
+   * rock pile or their own extractor) | fight (everyone charges the nearest enemy they can see).
+   * Returns an error message, or null.
+   */
+  skill(units, kind) {
+    units = units.filter((u) => !u.dead && u.type === 'unit');
+    if (!units.length) return 'Select some units.';
+    const pid = units[0].owner;
+    if (kind === 'fight') {
+      let n = 0;
+      for (const u of units) {
+        let best = null, bd = 45;
+        for (const e of [...this.units, ...this.buildings]) {
+          if (e.dead || !this.canAttack(u, e)) continue;
+          if (pid === 0 && !(e.type === 'building' ? e.seen : this.fog.visible(e.x, e.z))) continue;
+          const d = dist(u.x, u.z, e.x, e.z) + (e.type === 'building' ? 6 : 0);
+          if (d < bd) { bd = d; best = e; }
+        }
+        if (best) { this.order([u], { type: 'attack', target: best.id }); n++; }
+      }
+      return n ? null : 'No enemies in sight. Scout further out!';
+    }
+    const workers = units.filter((u) => u.def.worker);
+    if (!workers.length) return 'Only workers can do that.';
+    let n = 0;
+    for (const w of workers) {
+      if (kind === 'chop') {
+        const t = this.world.nearestTree(w.x, w.z, 40);
+        if (t) { this.order([w], { type: 'gather', lumber: true, tree: t }); n++; }
+      } else if (kind === 'mine' || kind === 'rock') {
+        const r = this.nearestRes(w.x, w.z, kind, 60);
+        if (r) { this.order([w], { type: 'gather', res: r.id }); n++; }
+      } else if (kind === 'gas') {
+        const ex = this.buildings.filter((b) => !b.dead && b.owner === pid && b.def.type === 'extractor')
+          .sort((a, b) => dist(a.x, a.z, w.x, w.z) - dist(b.x, b.z, w.x, w.z))[0];
+        if (ex) { this.order([w], ex.built ? { type: 'gather', res: ex.id } : { type: 'construct', target: ex.id }); n++; }
+      }
+    }
+    if (n) return null;
+    return { chop: 'No trees nearby.', mine: 'No gold mine nearby.', rock: 'No rock piles nearby.', gas: 'Build an extractor on an aether geyser first (B, then E).' }[kind];
   }
 
   exhaustMine(m) {
@@ -955,6 +1073,8 @@ export class Game {
     if (this.edgeDist(u, b) > 0.9) { this.moveTo(u, b.x, b.z, dt, 0); return; }
     u.anim.work = true;
     this.faceTo(u, b.x, b.z, dt);
+    u.hamT = (u.hamT ?? Math.random()) - dt;
+    if (u.hamT <= 0) { u.hamT = 0.55; if (this.visibleToPlayer(u)) this.audio?.play('hammer', u); }
     // several builders speed it up, with diminishing returns
     const n = [...b.builders].filter((id) => { const w = this.ents.get(id); return w && !w.dead && w.order.type === 'construct' && w.order.target === b.id; }).length;
     const rate = (1 + (n - 1) * 0.6) / n;
@@ -1081,7 +1201,7 @@ export class Game {
       this.near(x, z, r, (o) => { if (this.isEnemy(u, o) && o.owner !== undefined && !o.dead) fn(o); });
       for (const b of this.buildings) if (!b.dead && this.isEnemy(u, b) && b.owner !== NEUTRAL && dist(b.x, b.z, x, z) < r + b.size / 2) fn(b);
     };
-    if (this.visibleToPlayer(u)) this.audio?.play('cast', u);
+    if (this.visibleToPlayer(u)) this.audio?.play(spellSound(A, id), A.target === 'point' ? { x: tx, z: tz } : u);
     const from = this.muzzle(u);
     switch (A.kind) {
       case 'heal': this.heal(te, A.amount * pw); this.fx.column(te.x, te.y, te.z, A.color, 4, 0.9, 0.6); break;
@@ -1224,5 +1344,56 @@ export class Game {
     for (const u of this.units) if (!u.dead && u.owner === pid) out.push({ x: u.x, z: u.z, r: u.def.sight });
     for (const b of this.buildings) if (!b.dead && b.owner === pid) out.push({ x: b.x, z: b.z, r: b.built ? b.def.sight : 4 });
     return out;
+  }
+}
+
+// ── which sound for what ─────────────────────────────────────────────────────────────────────────
+function launchSound(u, proj) {
+  if (u.type === 'building') return u.def.style === 'deepforge' ? 'cannon' : 'bow';
+  const L = u.def.look ?? {};
+  if (L.machine === 'cannon') return 'cannon';
+  if (L.machine === 'catapult' || L.body === 'treant') return 'catapult';
+  if (L.machine === 'ballista') return 'bow';
+  if (proj === 'bullet') return 'rifle';
+  if (proj === 'spear') return 'spear';
+  if (proj === 'breath') return 'breath';
+  if (proj === 'bolt' || proj === 'glaive') return 'zap';
+  return 'bow';
+}
+
+function meleeSound(u, t) {
+  const L = u.def.look ?? {};
+  if (L.body === 'golem' || L.body === 'treant' || L.body === 'ogre' || L.body === 'wyrm') return 'slam';
+  if (L.body === 'wolf' || L.body === 'spider' || L.flyer === 'gargoyle') return 'claw';
+  if (L.body === 'undead' && !L.weapon) return 'bones';
+  if (['axe', 'greataxe', 'hammer', 'warhammer', 'club', 'pick'].includes(L.weapon)) return 'thud';
+  if (t.type === 'building') return 'thud';
+  return 'clang';
+}
+
+function deathVoice(def) {
+  const L = def.look ?? {};
+  if (L.machine || L.flyer === 'gyro') return { kind: 'machine' };
+  if (L.body === 'wisp') return { kind: 'wisp' };
+  if (L.body === 'undead' || def.faction === 'dread' || (L.body === 'golem' && L.golem === 'bone')) return { kind: 'undead' };
+  if (L.body === 'wolf' || L.body === 'spider' || L.flyer) return { kind: 'beast' };
+  if (L.body === 'ogre' || L.body === 'wyrm' || L.body === 'golem' || L.body === 'treant') return { kind: 'big' };
+  return { kind: 'humanoid', pitch: { ironfang: 85, sylvan: 240, deepforge: 105 }[def.faction] ?? 140, rough: def.faction === 'ironfang' ? 0.6 : 0 };
+}
+
+function spellSound(A, id) {
+  switch (A.kind) {
+    case 'heal': return 'heal';
+    case 'shield': return 'ward';
+    case 'chain': return id === 'glaive' ? 'zap' : 'lightning';
+    case 'stomp': return 'stomp';
+    case 'nova': return 'ice';
+    case 'aoe': return id === 'starfall' ? 'starfall' : id === 'flamestrike' ? 'fire' : id === 'shockwave' ? 'quake' : 'ice';
+    case 'summon': return 'summon';
+    case 'buff': return A.buff === 'roar' ? 'roar' : 'buff';
+    case 'reveal': return 'reveal';
+    case 'roots': return 'roots';
+    case 'drain': return 'drain';
+    default: return 'zap';
   }
 }

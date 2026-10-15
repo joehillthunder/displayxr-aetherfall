@@ -53,7 +53,7 @@ function wingGeo() {
 const matCache = new Map();
 /** Cached fog-aware standard material. */
 export function M(color, o = {}) {
-  const k = `${color}|${o.r ?? 0.75}|${o.m ?? 0}|${o.e ?? ''}|${o.ei ?? 1}|${o.flat ?? 1}|${o.op ?? 1}|${o.ds ?? 0}`;
+  const k = `${color}|${o.r ?? 0.75}|${o.m ?? 0}|${o.e ?? ''}|${o.ei ?? 1}|${o.flat ?? 1}|${o.op ?? 1}|${o.ds ?? 0}|${o.pat ?? ''}`;
   let m = matCache.get(k);
   if (!m) {
     m = new THREE.MeshStandardMaterial({
@@ -62,7 +62,11 @@ export function M(color, o = {}) {
       transparent: (o.op ?? 1) < 1, opacity: o.op ?? 1, side: o.ds ? THREE.DoubleSide : THREE.FrontSide,
       depthWrite: (o.op ?? 1) >= 1,
     });
-    applyFog(m, o.e != null ? 'emi' : 'std');
+    // metal reflects the sky; everything else only picks up a little of it
+    m.envMapIntensity = (o.m ?? 0) > 0.3 ? 1.1 : 0.35;
+    // emissive and see-through materials stay clean; the rest get painterly grain or a pattern
+    const plain = o.e != null || (o.op ?? 1) < 1;
+    applyFog(m, plain ? 'emi' : 'std', null, plain ? {} : { grain: !o.pat, pat: o.pat });
     matCache.set(k, m);
   }
   return m;
@@ -606,6 +610,20 @@ export function makeUnitModel(def, teamHex) {
     if (look.hero) inner.scale.setScalar(1.1);
   } else P = humanoid(inner, look, team);
 
+  // what a worker is carrying: a gold sack, a bundle of logs, stone blocks or an aether crystal
+  let setCarry = () => {};
+  if (def.worker) {
+    const host = P.torso ?? P.body;
+    const cg = grp(host, P.torso ? [0, 0.3, -0.24] : [0, -0.05, -0.3]);
+    const items = {
+      gold: (() => { const g = grp(cg); add(g, G.sph, M(0x9a7a4a), [0, 0, 0], [0.17, 0.2, 0.14]); add(g, G.cyl, M(0x6a4a2a), [0, 0.18, 0], [0.06, 0.06, 0.06]); for (let i = 0; i < 3; i++) add(g, G.oct, M(0xffcc33, { m: 0.9, r: 0.25, e: 0x8a5a00, ei: 0.6 }), [(i - 1) * 0.07, 0.2, 0.05], [0.045, 0.05, 0.045], [i, i, 0], false); return g; })(),
+      lumber: (() => { const g = grp(cg); for (let i = 0; i < 3; i++) add(g, G.cyl6, M(0x7a5434, { pat: 'bark' }), [(i - 1) * 0.09, (i % 2) * 0.08, 0], [0.05, 0.5, 0.05], [0, 0, Math.PI / 2 + 0.1]); return g; })(),
+      stone: (() => { const g = grp(cg); add(g, G.box, M(0x9a948a, { pat: 'brick' }), [0, 0, 0], [0.24, 0.16, 0.18], [0, 0.3, 0]); add(g, G.rock, M(0x7d766c), [0.05, 0.14, 0], [0.09, 0.07, 0.09]); return g; })(),
+      aether: (() => { const g = grp(cg); add(g, G.crystal, M(0x8ff4ff, { e: 0x3fd8ff, ei: 2.6, r: 0.1 }), [0, 0.12, 0], [0.12, 0.12, 0.12], [0, 0, 0], false); add(g, G.sph, M(0x8ff4ff, { op: 0.3, e: 0x3fd8ff, ei: 1 }), [0, 0.12, 0], [0.16, 0.2, 0.16], [0, 0, 0], false); return g; })(),
+    };
+    for (const g of Object.values(items)) g.visible = false;
+    setCarry = (res) => { for (const [k, g] of Object.entries(items)) g.visible = k === res; };
+  }
   // RTS scale: units are drawn larger than life so they read at battlefield distance
   const SC = 1.3;
   inner.scale.multiplyScalar(SC);
@@ -696,16 +714,16 @@ export function makeUnitModel(def, teamHex) {
     }
     if (P.cape) P.cape.rotation.x = 0.1 + (st.moving ? 0.35 + Math.sin(t * 7) * 0.08 : Math.sin(t * 1.3) * 0.04);
   };
-  return { root, inner, animate, height: P.height ?? 1.6, parts: P };
+  return { root, inner, animate, height: P.height ?? 1.6, parts: P, setCarry };
 }
 
 // ── buildings ─────────────────────────────────────────────────────────────────────────────────────
 const STYLE = {
-  valemark:  { stone: 0xb8b2a6, wall: 0xe8dcc0, trim: 0x5a3e28, roof: 0x3a5a9a, accent: 0xf0d070, glowc: 0xfff0b0 },
-  ironfang:  { stone: 0x8a6a4a, wall: 0x7a5434, trim: 0x3a2a1a, roof: 0xb88a5a, accent: 0xe8e0c8, glowc: 0xff8a30 },
-  sylvan:    { stone: 0xb8b8c8, wall: 0x6a4a3a, trim: 0x3a2a2a, roof: 0x4a8a7a, accent: 0xc8b8ff, glowc: 0x9fd8ff },
-  dread:     { stone: 0x4a4650, wall: 0x3a3442, trim: 0x2a2630, roof: 0x5a3a7a, accent: 0xe0dcc8, glowc: 0x8aff6a },
-  deepforge: { stone: 0x8a8278, wall: 0x9a8a78, trim: 0xb08850, roof: 0x6a5a4a, accent: 0xb08850, glowc: 0xff9a40 },
+  valemark:  { stone: 0xb8b2a6, wall: 0xe8dcc0, trim: 0x5a3e28, roof: 0x3a5a9a, accent: 0xf0d070, glowc: 0xfff0b0, pat: { st: 'brick', trim: 'plank', roof: 'shingle' } },
+  ironfang:  { stone: 0x8a6a4a, wall: 0x7a5434, trim: 0x3a2a1a, roof: 0xb88a5a, accent: 0xe8e0c8, glowc: 0xff8a30, pat: { wall: 'plank', trim: 'plank' } },
+  sylvan:    { stone: 0xb8b8c8, wall: 0x6a4a3a, trim: 0x3a2a2a, roof: 0x4a8a7a, accent: 0xc8b8ff, glowc: 0x9fd8ff, pat: { st: 'brick', wall: 'bark', trim: 'bark' } },
+  dread:     { stone: 0x4a4650, wall: 0x3a3442, trim: 0x2a2630, roof: 0x5a3a7a, accent: 0xe0dcc8, glowc: 0x8aff6a, pat: { st: 'brick', wall: 'brick', roof: 'shingle' } },
+  deepforge: { stone: 0x8a8278, wall: 0x9a8a78, trim: 0xb08850, roof: 0x6a5a4a, accent: 0xb08850, glowc: 0xff9a40, pat: { st: 'brick', wall: 'brick', roof: 'shingle' } },
 };
 
 export function makeBuildingModel(def, teamHex) {
@@ -715,7 +733,8 @@ export function makeBuildingModel(def, teamHex) {
   const root = new THREE.Group();
   const g = grp(root);
   const P = { root, inner: g, lights: [], spin: [], smoke: [], bob: [] };
-  const st = M(S.stone), wall = M(S.wall), trim = M(S.trim), roofM = M(tint(S.roof, team, 0.35)), teamM = M(team), acc = M(S.accent, { m: 0.4, r: 0.5 });
+  const pt = S.pat;
+  const st = M(S.stone, { pat: pt.st }), wall = M(S.wall, { pat: pt.wall }), trim = M(S.trim, { pat: pt.trim }), roofM = M(tint(S.roof, team, 0.35), { pat: pt.roof }), teamM = M(team), acc = M(S.accent, { m: 0.4, r: 0.5 });
   const glowM = glow(S.glowc, 1.8);
   const B = BUILDERS[def.style];
   B[def.type](g, s, { st, wall, trim, roofM, teamM, acc, glowM, S, team, P });
@@ -1101,13 +1120,33 @@ export function makeGoldMine() {
   return root;
 }
 
+/** A pile of rocks for stone. `setAmount(k)` shrinks it as it's quarried away. */
+export function makeRockPile(seed = 1) {
+  const root = new THREE.Group();
+  const pile = grp(root);
+  let s = seed * 9301 + 49297;
+  const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  const shades = [0x8a847a, 0x7d766c, 0x9a948a, 0x6e685f];
+  for (let i = 0; i < 7; i++) {
+    const a = rnd() * 6.28, d = rnd() * 0.6;
+    const sc = 0.3 + rnd() * 0.35 - d * 0.2;
+    add(pile, G.rock, M(shades[i % 4]), [Math.cos(a) * d, sc * 0.6, Math.sin(a) * d], [sc, sc * 0.8, sc], [rnd(), rnd() * 6, 0]);
+  }
+  // a few quarried blocks and a pickaxe left by the miners
+  for (let i = 0; i < 3; i++) add(pile, G.box, M(0xa8a296, { pat: 'brick' }), [0.75 - i * 0.2, 0.09, 0.55 + (i % 2) * 0.2], [0.24, 0.16, 0.18], [0, i * 0.7, 0]);
+  add(pile, G.cyl6, M(0x6a4a2a), [-0.7, 0.15, 0.5], [0.025, 0.55, 0.025], [0, 0, 1.2]);
+  add(pile, G.box, M(0xc8ced8, { m: 0.7, r: 0.35 }), [-0.92, 0.3, 0.5], [0.05, 0.28, 0.05], [0, 0, 1.2]);
+  root.userData.setAmount = (k) => pile.scale.setScalar(0.45 + 0.55 * Math.max(0, Math.min(1, k)));
+  return root;
+}
+
 export function makeGeyser(great) {
   const root = new THREE.Group();
   const sc = great ? 1.6 : 1;
   const rockM = M(0x5a5468);
   for (let i = 0; i < 9; i++) { const a = i / 9 * 6.28; add(root, G.rock, rockM, [Math.sin(a) * 1.1 * sc, 0.2, Math.cos(a) * 1.1 * sc], [0.45 * sc, 0.35 * sc, 0.45 * sc], [i, i, 0]); }
   add(root, G.cyl, M(0x1a1630), [0, 0.05, 0], [0.9 * sc, 0.1, 0.9 * sc]);
-  const pool = add(root, G.cyl, M(0x8ff4ff, { e: 0x3fc8ff, ei: 2.4, r: 0.1 }), [0, 0.12, 0], [0.7 * sc, 0.04, 0.7 * sc], [0, 0, 0], false);
+  const pool = add(root, G.cyl, M(0x6fe0f0, { e: 0x2fa8e0, ei: 1.2, r: 0.1 }), [0, 0.12, 0], [0.7 * sc, 0.04, 0.7 * sc], [0, 0, 0], false);
   const cm = M(great ? 0xd8a8ff : 0x9ff4ff, { e: great ? 0xa060ff : 0x3fd8ff, ei: 1.8, r: 0.15, op: 0.92 });
   crystalCluster(root, 1.2 * sc, 0, 0.5 * sc, 0.35 * sc, cm, 4);
   crystalCluster(root, -1.0 * sc, 0, -0.9 * sc, 0.28 * sc, cm, 3);

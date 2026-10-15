@@ -65,6 +65,7 @@
   #cmd button.passive { border-style: dashed; }
   #cmd .ic { font-size: 22px; line-height: 1; }
   #cmd .hk { position: absolute; top: 2px; left: 4px; font: 700 10px ui-monospace, Consolas, monospace; color: var(--gold); }
+  #cmd .hk em { font-style: normal; color: var(--aether); margin-left: 4px; }
   #cmd .lb { font-size: 9.5px; color: var(--muted); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; margin-top: 3px; }
   #cmd .cdv { position: absolute; left: 0; right: 0; bottom: 0; background: #000a; pointer-events: none; }
 
@@ -212,6 +213,7 @@
   <div class="res" title="Gold"><i>💰</i><span id="r-gold">0</span></div>
   <div class="res" title="Lumber"><i>🪵</i><span id="r-lumber">0</span></div>
   <div class="res" title="Aether"><i>💠</i><span id="r-aether">0</span></div>
+  <div class="res" title="Stone"><i>🪨</i><span id="r-stone">0</span></div>
   <div class="res" title="Supply used / available"><i>👥</i><span id="r-supply">0/0</span></div>
   <button id="idle" title="Select an idle worker"></button>
   <span id="clock"></span>
@@ -220,7 +222,8 @@
     <label title="Stereo depth"><span>Depth</span><input id="depth" type="range" min="0" max="2" step="0.05" value="1"></label>
     <button id="lens" style="display:none" title="Switch the display between 2D and 3D">2D/3D</button>
     <select id="quality" title="Graphics quality"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
-    <button id="sound" title="Sound">🔊</button>
+    <button id="sound" title="Sound effects">🔊</button>
+    <button id="music" title="Music">🎵</button>
     <button id="pausebtn" title="Pause (P)">⏸</button>
     <button id="helpbtn" title="Help (?)">?</button>
     <button id="full" title="Fullscreen">⛶</button>
@@ -281,7 +284,9 @@
     <tr><td>Command</td><td>Right-click: move, attack, gather (mine, tree, extractor), resume a building, set a rally point</td></tr>
     <tr><td>Attack-move, Move, Stop, Hold</td><td><kbd>A</kbd> <kbd>M</kbd> <kbd>S</kbd> <kbd>H</kbd></td></tr>
     <tr><td>Hero abilities</td><td><kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd>, then click a target</td></tr>
-    <tr><td>Workers</td><td><kbd>G</kbd> gather, <kbd>B</kbd> build, <kbd>V</kbd> advanced build, <kbd>R</kbd> return cargo</td></tr>
+    <tr><td>Worker skills</td><td><kbd>C</kbd>/<kbd>1</kbd> chop wood, <kbd>G</kbd>/<kbd>2</kbd> mine gold, <kbd>K</kbd>/<kbd>3</kbd> gather rocks, <kbd>X</kbd>/<kbd>4</kbd> capture aether gas: every selected worker heads for the nearest one</td></tr>
+    <tr><td>Fight skill</td><td><kbd>F</kbd>/<kbd>5</kbd>: every selected unit charges the nearest enemy in sight</td></tr>
+    <tr><td>Workers</td><td><kbd>B</kbd> build, <kbd>V</kbd> advanced build, <kbd>R</kbd> return cargo. Number keys trigger skills until you assign that number to a control group.</td></tr>
     <tr><td>Buildings</td><td><kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> train, <kbd>A</kbd> <kbd>S</kbd> research, <kbd>T</kbd> rally, <kbd>H</kbd> revive hero, click a queued unit to cancel it</td></tr>
     <tr><td>Camera</td><td>Arrow keys, screen edges, middle-drag, wheel to zoom, click the minimap</td></tr>
     <tr><td>Groups</td><td><kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> to set, <kbd>1</kbd>–<kbd>9</kbd> to select, press twice to jump there</td></tr>

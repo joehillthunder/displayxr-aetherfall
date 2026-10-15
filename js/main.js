@@ -18,9 +18,9 @@ const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 
 const QUALITY = {
-  high: { shadow: 2048, density: 1, eye: 2560 },
-  medium: { shadow: 1024, density: 0.7, eye: 1920 },
-  low: { shadow: 0, density: 0.4, eye: 1280 },
+  high: { shadow: 2048, density: 1, eye: 2560, bloom: true, samples: 4, grass: 26000 },
+  medium: { shadow: 1024, density: 0.7, eye: 1920, bloom: true, samples: 2, grass: 12000 },
+  low: { shadow: 0, density: 0.4, eye: 1280, bloom: false, samples: 0, grass: 0 },
 };
 
 const canvas = $('stage');
@@ -30,7 +30,31 @@ const audio = new Audio();
 let quality = params.get('quality') ?? load('quality', 'high');
 
 // ── lights and sky ──────────────────────────────────────────────────────────────────────────────
-const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x4a3a28, 0.9);
+const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x4a3a28, 0.75);
+
+// An outdoor reflection map (sky gradient, a warm sun, brown earth below), so metal armour, gold
+// and water-slick crystals pick up the sky instead of looking flat.
+function skyEnvironment() {
+  const env = new THREE.Scene();
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    vertexShader: 'varying vec3 vP; void main() { vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: `varying vec3 vP; void main() {
+      float h = normalize(vP).y;
+      vec3 sky = mix(vec3(0.85, 0.82, 0.72), vec3(0.32, 0.55, 0.95), smoothstep(0.0, 0.6, h));
+      vec3 ground = mix(vec3(0.35, 0.3, 0.22), vec3(0.18, 0.22, 0.12), smoothstep(0.0, -0.5, h));
+      vec3 c = h > 0.0 ? sky : ground;
+      float sun = pow(max(dot(normalize(vP), normalize(vec3(0.5, 0.6, 0.3))), 0.0), 200.0);
+      gl_FragColor = vec4(c + vec3(6.0, 5.4, 4.2) * sun, 1.0);
+    }`,
+  }));
+  env.add(dome);
+  const pm = new THREE.PMREMGenerator(stage.renderer);
+  const tex = pm.fromScene(env, 0.02).texture;
+  pm.dispose();
+  return tex;
+}
+scene.environment = skyEnvironment();
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.4);
 sun.castShadow = true;
 sun.shadow.bias = -0.0006;
@@ -51,6 +75,9 @@ function applyQuality() {
   sun.castShadow = Q.shadow > 0;
   if (Q.shadow) { sun.shadow.mapSize.set(Q.shadow, Q.shadow); sun.shadow.map?.dispose(); sun.shadow.map = null; }
   stage.maxEyeW = Q.eye;
+  // bloom makes aether, spells, windows and the hero sigils glow; threshold sits above lit ground
+  stage.post = { enabled: Q.bloom && params.get('bloom') !== '0', samples: Q.samples, strength: 0.55, radius: 0.45, threshold: 0.95 };
+  stage.composerKey = '';
   stage.sizeToCanvas();
   if (fx) fx.density = Q.density;
   scene.traverse((o) => { if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach((m) => { m.needsUpdate = true; }); } });
@@ -64,7 +91,7 @@ function buildWorld(seed, styles) {
   if (world) scene.remove(world.group);
   if (fx) { scene.remove(fx.glow.points, fx.smoke.points); }
   world = new World(seed, styles);
-  scene.add(world.buildMeshes());
+  scene.add(world.buildMeshes(QUALITY[quality] ?? QUALITY.high));
   fog = new Fog(N);
   fogUniforms.uFog.value = fog.tex;
   fogUniforms.uWorldSize.value = N;
@@ -110,6 +137,7 @@ function lighting(t, target, dist) {
   scene.background.copy(tmp);
   scene.fog.color.copy(tmp);
   world.waterMat.uniforms.uDay.value = lerp(0.35, 1, dayK);
+  fogUniforms.uCloud.value = dayK;
   world.waterMat.uniforms.uSun.value.copy(dir);
   return dayK;
 }
@@ -131,6 +159,8 @@ stage.onTick = (dt) => {
     stage.focusDist = 70;
     lighting(150, new THREE.Vector3(64, 0, 64), 70);
     fx.update(dt);
+    audio.listener = () => ({ x: 64, z: 64, range: 90 });
+    audio.update(dt, { day: 1, menu: true, geyser: { d: 30, tapped: false, great: true }, water: 30, intensity: 0 });
     return;
   }
   const gdt = ui.paused ? 0 : dt * speed;
@@ -143,6 +173,8 @@ stage.onTick = (dt) => {
   const dayK = lighting(game.time, new THREE.Vector3(T.x, T.gy, T.z), T.dist);
   ui.update(dt, dayK);
   audio.listener = () => ({ x: T.x, z: T.z, range: 18 + T.dist });
+  fx.fireflies(T.x, T.z, 1 - dayK, gdt);
+  audio.update(dt, { day: dayK, menu: false, geyser: nearestGeyser(T), water: nearestWater(T, dt), intensity: Math.min(1, game.heat ?? 0) });
 };
 stage.onModeChange = (stereo) => updateBadge();
 
@@ -239,7 +271,32 @@ function startMatch() {
   canvas.focus();
 }
 
+/** The aether geyser nearest the camera target (for the bubbling ambience). */
+function nearestGeyser(T) {
+  let best = null;
+  for (const g of game.resources) {
+    if (g.type !== 'geyser' || !fog.isExplored(g.x, g.z)) continue;
+    const d = Math.hypot(g.x - T.x, g.z - T.z);
+    if (!best || d < best.d) best = { d, tapped: !!g.extractor && game.ents.get(g.extractor)?.built, great: g.great };
+  }
+  return best;
+}
+
+let waterD = 99, waterT = 0;
+/** Distance from the camera target to the nearest water, sampled twice a second. */
+function nearestWater(T, dt) {
+  waterT -= dt;
+  if (waterT > 0) return waterD;
+  waterT = 0.5;
+  waterD = 99;
+  for (let dz = -18; dz <= 18; dz += 3) for (let dx = -18; dx <= 18; dx += 3) {
+    if (world.heightAt(T.x + dx, T.z + dz) < -0.3) waterD = Math.min(waterD, Math.hypot(dx, dz));
+  }
+  return waterD;
+}
+
 function showEnd(result) {
+  audio.play(result === 'victory' ? 'victory' : 'defeat');
   const p = game.players[0].stats;
   const won = result === 'victory';
   $('end').innerHTML = `<div class="panel endp"><h2 class="${won ? 'win' : 'lose'}">${won ? 'Victory' : 'Defeat'}</h2>
@@ -262,6 +319,11 @@ $('depth').addEventListener('input', (e) => stage.setDepth(Number(e.target.value
 if (params.get('depth')) { stage.setDepth(Number(params.get('depth'))); $('depth').value = params.get('depth'); }
 $('lens').addEventListener('click', async () => { if (!(await stage.setStereo(!stage.stereo))) ui?.message('2D/3D switching needs the DisplayXR Browser.'); updateBadge(); });
 $('sound').addEventListener('click', () => { audio.unlock(); audio.on = !audio.on; $('sound').textContent = audio.on ? '🔊' : '🔇'; });
+$('music').addEventListener('click', () => { audio.unlock(); audio.setMusic(!audio.musicOn); $('music').style.opacity = audio.musicOn ? 1 : 0.4; save('music', audio.musicOn); });
+audio.musicOn = load('music', true);
+$('music').style.opacity = audio.musicOn ? 1 : 0.4;
+// browsers only allow sound after a gesture: the first click or key anywhere starts the audio
+for (const ev of ['pointerdown', 'keydown']) window.addEventListener(ev, () => audio.unlock(), { once: true });
 $('helpbtn').addEventListener('click', () => $('help').classList.toggle('show'));
 $('help').addEventListener('click', (e) => { if (e.target.id === 'help' || e.target.closest('.close')) $('help').classList.remove('show'); });
 $('pausebtn').addEventListener('click', () => ui?.togglePause());
