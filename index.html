@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Aetherfall: Realms at War</title>
+<meta name="description" content="A classic-style fantasy real-time strategy game in glasses-free 3D: five races, ten heroes, gold, lumber and glowing aether geysers. DisplayXR on a 3D display, 2D in any browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L52 26 L32 60 L12 26Z' fill='%235ff0ff' stroke='%23f0c040' stroke-width='4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: dark;
+    --ink: #f3e9d2;
+    --muted: #b8a888;
+    --gold: #e8c060;
+    --gold2: #a07a2a;
+    --panel: linear-gradient(180deg, #2a2118 0%, #1b150f 100%);
+    --edge: #6a5230;
+    --aether: #5ff0ff;
+    --bad: #ff6a50;
+    --good: #7fe07f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0b08; color: var(--ink);
+    font: 14px/1.35 "Segoe UI", system-ui, -apple-system, sans-serif; user-select: none; -webkit-user-select: none; }
+  #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; outline: none; touch-action: none; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  h1, h2, h3, .serif { font-family: Cinzel, Georgia, serif; }
+  .panel { background: var(--panel); border: 2px solid var(--edge); box-shadow: inset 0 0 0 1px #0008, inset 0 0 0 3px #c8a05a33, 0 6px 24px #000a; border-radius: 6px; }
+
+  /* top bar */
+  #top { position: fixed; top: 0; left: 0; right: 0; height: 40px; display: flex; align-items: center; gap: 14px; padding: 0 10px; z-index: 4;
+    background: linear-gradient(180deg, #2a2118f2, #1b150fe6); border-bottom: 2px solid var(--edge); }
+  .res { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 15px; min-width: 76px; }
+  .res i { font-style: normal; font-size: 17px; }
+  .res.full span { color: var(--bad); }
+  #r-aether { color: var(--aether); text-shadow: 0 0 8px #5ff0ff88; }
+  #clock { margin-left: auto; font-weight: 600; color: var(--muted); }
+  #idle { display: none; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 4px; background: #5a3a12; border: 1px solid var(--gold2); font-size: 13px; }
+  .tb { display: flex; align-items: center; gap: 6px; }
+  .tb button, .tb select { background: #3a2c1c; border: 1px solid var(--edge); border-radius: 4px; padding: 3px 8px; color: var(--ink); font-size: 13px; }
+  .tb button:hover { background: #4a3a24; }
+  .tb label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+  .tb input[type=range] { width: 70px; accent-color: var(--gold); }
+  #badge { font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; background: #3a3020; color: var(--muted); }
+  #badge[data-kind="ok"] { background: #12402a; color: var(--good); }
+  #fps { font: 11px ui-monospace, Consolas, monospace; color: #8a7a5a; min-width: 46px; }
+
+  /* bottom HUD */
+  #bottom { position: fixed; left: 0; right: 0; bottom: 0; height: 196px; display: flex; gap: 8px; padding: 8px; z-index: 4; pointer-events: none; }
+  #bottom > * { pointer-events: auto; }
+  #mmwrap { width: 196px; height: 180px; padding: 6px; flex: none; }
+  #minimap { width: 100%; height: 100%; display: block; image-rendering: pixelated; cursor: pointer; background: #000; }
+  #sel { flex: 1; min-width: 0; padding: 10px 12px; overflow: hidden; }
+  #cmd { width: 268px; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(3, 1fr); gap: 4px; padding: 6px; }
+  #cmd .slot { background: #0006; border-radius: 4px; }
+  #cmd button { position: relative; overflow: hidden; border-radius: 5px; background: linear-gradient(180deg, #4a3a24, #2a2016); border: 1px solid #8a6a3a; box-shadow: inset 0 1px 0 #ffffff22; padding: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #cmd button:hover { border-color: var(--gold); background: linear-gradient(180deg, #5a4628, #33261a); }
+  #cmd button.active { border-color: var(--aether); box-shadow: 0 0 10px #5ff0ff88 inset; }
+  #cmd button.off { filter: grayscale(1) brightness(0.55); }
+  #cmd button.poor .ic { opacity: 0.55; }
+  #cmd button.poor::after { content: ""; position: absolute; inset: 0; background: #a0201a22; }
+  #cmd button.passive { border-style: dashed; }
+  #cmd .ic { font-size: 22px; line-height: 1; }
+  #cmd .hk { position: absolute; top: 2px; left: 4px; font: 700 10px ui-monospace, Consolas, monospace; color: var(--gold); }
+  #cmd .lb { font-size: 9.5px; color: var(--muted); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 3px; margin-top: 3px; }
+  #cmd .cdv { position: absolute; left: 0; right: 0; bottom: 0; background: #000a; pointer-events: none; }
+
+  .single { display: flex; gap: 12px; height: 100%; }
+  .por { width: 92px; height: 92px; flex: none; border-radius: 6px; display: grid; place-items: center; font-size: 52px;
+    background: radial-gradient(circle at 50% 35%, #4a3a2a, #120d08); border: 2px solid var(--gold2); }
+  .info { flex: 1; min-width: 0; }
+  .info > b { font-family: Cinzel, Georgia, serif; font-size: 16px; color: var(--gold); }
+  .info small { color: var(--muted); }
+  .lvl { font-size: 12px; background: #5a3a12; border: 1px solid var(--gold2); border-radius: 3px; padding: 0 6px; margin-left: 4px; }
+  .bar { position: relative; height: 16px; margin: 5px 0 2px; background: #000a; border: 1px solid #0008; border-radius: 3px; overflow: hidden; max-width: 340px; }
+  .bar i { position: absolute; inset: 0 auto 0 0; background: #3fcf4f; }
+  .bar.mana i { background: linear-gradient(90deg, #2050d0, #4fa0ff); }
+  .bar.build i { background: linear-gradient(90deg, #a07a2a, #e8c060); }
+  .bar span { position: relative; display: block; text-align: center; font-size: 11px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+  .xp { position: relative; height: 10px; max-width: 340px; background: #000a; border-radius: 3px; overflow: hidden; margin: 3px 0; }
+  .xp i { position: absolute; inset: 0 auto 0 0; background: linear-gradient(90deg, #8a5aff, #d0a0ff); }
+  .xp span { position: relative; display: block; text-align: center; font-size: 9px; line-height: 10px; }
+  .stats { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 13px; }
+  .row { margin-top: 4px; }
+  .small { font-size: 12px; color: var(--muted); }
+  .dim { color: #8a7a5a; }
+  .warn { color: var(--bad); font-size: 12px; }
+  .queue { display: flex; gap: 4px; margin-top: 6px; }
+  .qi { position: relative; width: 38px; height: 38px; display: grid; place-items: center; font-size: 22px; background: #0008; border: 1px solid var(--edge); border-radius: 4px; cursor: pointer; overflow: hidden; }
+  .qi:hover { border-color: var(--bad); }
+  .qi i { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--gold); }
+  .multi { display: flex; flex-wrap: wrap; gap: 4px; }
+  .mini { position: relative; width: 44px; height: 44px; display: grid; place-items: center; font-size: 24px; background: #0008; border: 1px solid var(--edge); border-radius: 4px; cursor: pointer; }
+  .mini i { position: absolute; left: 2px; bottom: 2px; height: 4px; border-radius: 2px; }
+  .empty { color: var(--muted); }
+  .empty b { font-family: Cinzel, Georgia, serif; color: var(--gold); font-size: 16px; }
+
+  #tip { position: fixed; display: none; width: 280px; padding: 8px 10px; z-index: 9; font-size: 12.5px; pointer-events: none;
+    background: #120d08f2; border: 1px solid var(--gold2); border-radius: 5px; box-shadow: 0 4px 16px #000c; }
+  #tip b { color: var(--gold); font-size: 14px; }
+  .hk2 { color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+  .cost { white-space: nowrap; margin-right: 6px; }
+  .cost.mana { color: #7fb0ff; }
+  .tipd { margin-top: 4px; color: #d8ccb0; }
+  .tipw { margin-top: 4px; color: var(--bad); }
+
+  #msgs { position: fixed; left: 50%; bottom: 210px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 5; pointer-events: none; width: min(720px, 90vw); }
+  .msg { padding: 4px 14px; border-radius: 4px; background: #000a; font-weight: 600; text-shadow: 0 1px 2px #000; transition: opacity 1s; text-align: center; }
+  .msg.warn { color: #ffd060; }
+  .msg.alert { color: #ff7a60; }
+  .msg.good { color: #a0ff9a; }
+  .msg.fade { opacity: 0; }
+  #modehint { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); display: none; padding: 4px 14px; background: #000b; border: 1px solid var(--aether); border-radius: 4px; z-index: 5; color: var(--aether); pointer-events: none; }
+  #box { position: fixed; display: none; border: 1px solid #7fff7f; background: #7fff7f1a; pointer-events: none; z-index: 3; }
+  #pause { position: fixed; inset: 0; display: none; place-items: center; z-index: 6; background: #0006; pointer-events: none; }
+  #pause.show { display: grid; }
+  #pause div { font: 800 42px Cinzel, Georgia, serif; color: var(--gold); text-shadow: 0 2px 10px #000; }
+
+  /* menu */
+  #menu { position: fixed; inset: 0; z-index: 10; display: none; overflow: auto; padding: 24px 16px 40px;
+    background: radial-gradient(ellipse at center, #0c0a0866 0%, #0c0a08d8 70%); }
+  #menu.show { display: block; }
+  body.in-menu #top, body.in-menu #bottom { display: none; }
+  .mwrap { max-width: 1180px; margin: 0 auto; }
+  .title { text-align: center; margin: 4px 0 18px; }
+  .title h1 { margin: 0; font-size: clamp(34px, 6vw, 64px); letter-spacing: 3px; color: var(--gold);
+    text-shadow: 0 0 24px #5ff0ff55, 0 3px 0 #5a3a12, 0 6px 18px #000; }
+  .title h1 span { color: var(--aether); }
+  .title p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+  .step { font-family: Cinzel, Georgia, serif; color: var(--gold); font-size: 17px; margin: 18px 0 8px; }
+  #factions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+  .fcard { text-align: left; padding: 12px; border-radius: 8px; background: linear-gradient(180deg, #2a2118ee, #15100bee); border: 2px solid #5a4428; min-height: 150px; }
+  .fcard:hover { border-color: var(--gold2); }
+  .fcard.on { border-color: var(--fc); box-shadow: 0 0 18px color-mix(in srgb, var(--fc) 50%, transparent), inset 0 0 22px color-mix(in srgb, var(--fc) 22%, transparent); }
+  .fcard .em { font-size: 34px; display: block; }
+  .fcard b { display: block; font-family: Cinzel, Georgia, serif; font-size: 15px; color: var(--ink); margin-top: 4px; }
+  .fcard small { color: var(--fc); font-weight: 700; }
+  .fcard p { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+  .two { display: grid; grid-template-columns: 1.1fr 1fr; gap: 14px; }
+  #lore { padding: 14px 16px; }
+  #lore h3 { margin: 0 0 6px; color: var(--gold); }
+  #lore p { margin: 0 0 10px; color: #d8ccb0; }
+  .roster { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .roster span { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #3a2c1c; border: 1px solid #5a4428; }
+  .roster.bld span { background: #1c2a2c; border-color: #2a4a4a; }
+  #heroes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hcard { text-align: left; padding: 12px; border-radius: 8px; background: linear-gradient(180deg, #2a2118ee, #15100bee); border: 2px solid #5a4428; }
+  .hcard.on { border-color: var(--gold); box-shadow: 0 0 16px #e8c06055; }
+  .hcard > b { font-family: Cinzel, Georgia, serif; font-size: 16px; color: var(--gold); }
+  .hcard > small { display: block; color: var(--muted); }
+  .hcard p { margin: 6px 0; font-size: 13px; }
+  .hcard ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .hcard li { font-size: 12.5px; }
+  .hcard li small { color: var(--muted); }
+  .hcard li em { color: var(--muted); font-size: 11px; }
+  .ai { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; background: #3a2c1c; color: var(--aether); }
+  .opts { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 12px 14px; margin-top: 14px; }
+  .opts label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .opts select, .opts input[type=number] { background: #3a2c1c; color: var(--ink); border: 1px solid var(--edge); border-radius: 4px; padding: 4px 6px; font: inherit; }
+  .opts input[type=number] { width: 90px; }
+  .opts button { background: #3a2c1c; border: 1px solid var(--edge); border-radius: 4px; padding: 4px 8px; }
+  #start { display: block; margin: 18px auto 0; padding: 12px 46px; font: 800 22px Cinzel, Georgia, serif; letter-spacing: 2px; color: #1b1208;
+    background: linear-gradient(180deg, #ffe08a, #c8902a); border: 2px solid #ffe8a0; border-radius: 8px; box-shadow: 0 0 24px #e8c06066, 0 4px 0 #6a4a12; }
+  #start:hover { filter: brightness(1.1); }
+  .foot { text-align: center; margin-top: 14px; color: #8a7a5a; font-size: 12px; }
+  .foot a { color: var(--muted); }
+
+  /* help and end */
+  #help, #end { position: fixed; inset: 0; z-index: 11; display: none; place-items: center; background: #000a; padding: 16px; }
+  #help.show, #end.show { display: grid; }
+  .helpp, .endp { max-width: 760px; width: 100%; max-height: 90vh; overflow: auto; padding: 18px 22px; }
+  .helpp h2, .endp h2 { margin: 0 0 8px; color: var(--gold); }
+  .helpp table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .helpp td { padding: 3px 6px; border-bottom: 1px solid #3a2c1c; vertical-align: top; }
+  .helpp td:first-child { white-space: nowrap; color: var(--gold); width: 38%; }
+  .helpp p { color: #d8ccb0; font-size: 13px; }
+  .close { float: right; background: #3a2c1c; border: 1px solid var(--edge); border-radius: 4px; padding: 2px 10px; }
+  .endp { text-align: center; max-width: 440px; }
+  .endp h2 { font-size: 46px; }
+  .endp h2.win { color: var(--gold); text-shadow: 0 0 20px #e8c06088; }
+  .endp h2.lose { color: var(--bad); }
+  .endp table { margin: 10px auto; font-size: 14px; }
+  .endp td { padding: 2px 10px; text-align: left; }
+  .endp td:last-child { text-align: right; font-weight: 700; }
+  .btns { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+  .btns button { background: #3a2c1c; border: 1px solid var(--gold2); border-radius: 5px; padding: 6px 16px; }
+
+  @media (max-width: 1100px) {
+    #factions { grid-template-columns: repeat(3, 1fr); }
+    .two { grid-template-columns: 1fr; }
+    .tb label span { display: none; }
+  }
+  @media (max-width: 780px) {
+    #factions { grid-template-columns: repeat(2, 1fr); }
+    #heroes { grid-template-columns: 1fr; }
+    #bottom { height: 150px; }
+    #mmwrap { width: 140px; height: 134px; }
+    #cmd { width: 200px; }
+    .por { display: none; }
+    .tb { gap: 3px; }
+    #clock { display: none; }
+  }
+</style>
+</head>
+<body class="in-menu">
+<canvas id="stage" tabindex="0"></canvas>
+
+<div id="top">
+  <div class="res" title="Gold"><i>💰</i><span id="r-gold">0</span></div>
+  <div class="res" title="Lumber"><i>🪵</i><span id="r-lumber">0</span></div>
+  <div class="res" title="Aether"><i>💠</i><span id="r-aether">0</span></div>
+  <div class="res" title="Supply used / available"><i>👥</i><span id="r-supply">0/0</span></div>
+  <button id="idle" title="Select an idle worker"></button>
+  <span id="clock"></span>
+  <div class="tb">
+    <span id="badge">2D</span>
+    <label title="Stereo depth"><span>Depth</span><input id="depth" type="range" min="0" max="2" step="0.05" value="1"></label>
+    <button id="lens" style="display:none" title="Switch the display between 2D and 3D">2D/3D</button>
+    <select id="quality" title="Graphics quality"><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select>
+    <button id="sound" title="Sound">🔊</button>
+    <button id="pausebtn" title="Pause (P)">⏸</button>
+    <button id="helpbtn" title="Help (?)">?</button>
+    <button id="full" title="Fullscreen">⛶</button>
+    <span id="fps"></span>
+  </div>
+</div>
+
+<div id="bottom">
+  <div id="mmwrap" class="panel"><canvas id="minimap" width="256" height="256"></canvas></div>
+  <div id="sel" class="panel"></div>
+  <div id="cmd" class="panel"></div>
+</div>
+
+<div id="msgs"></div>
+<div id="modehint"></div>
+<div id="box"></div>
+<div id="tip"></div>
+<div id="pause"><div>Paused</div></div>
+
+<div id="menu">
+  <div class="mwrap">
+    <div class="title">
+      <h1>Aether<span>fall</span></h1>
+      <p>Realms at War: a classic fantasy strategy game in glasses-free 3D</p>
+    </div>
+    <div class="step">1. Choose your realm</div>
+    <div id="factions"></div>
+    <div class="two">
+      <div>
+        <div class="step">The realm</div>
+        <div id="lore" class="panel"></div>
+      </div>
+      <div>
+        <div class="step">2. Choose your hero</div>
+        <div id="heroes"></div>
+      </div>
+    </div>
+    <div class="opts panel">
+      <label>Opponents <select id="opp"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></label>
+      <label>Enemy realm <select id="oppf"></select></label>
+      <label>Difficulty <select id="diff"><option value="easy">Easy</option><option value="normal">Normal</option><option value="hard">Hard</option></select></label>
+      <label>Map seed <input id="seed" type="number" min="1" max="99999"></label>
+      <button id="reroll" title="New random map">🎲 New map</button>
+      <label><input id="fogon" type="checkbox" checked> Fog of war</label>
+    </div>
+    <button id="start">Begin the War</button>
+    <div class="foot">Gold from mines, lumber from forests, and aether from glowing geysers. Build an extractor on a geyser to fuel siege engines, flyers and spellcasters.<br>
+      An original game inspired by classic fantasy real-time strategy. Glasses-free 3D with <a href="https://displayxr.org" target="_blank" rel="noopener">DisplayXR</a> on a 3D display, 2D everywhere else.</div>
+  </div>
+</div>
+
+<div id="help"><div class="panel helpp">
+  <button class="close">Close</button>
+  <h2>How to play</h2>
+  <p>Mine gold, cut lumber and draw aether, build up your town, train an army and destroy every enemy building. Your hero gains levels from kills and unlocks a new ability at levels 1, 2 and 3.</p>
+  <table>
+    <tr><td>Select</td><td>Left-click, drag a box, Shift+click to add, double-click or Ctrl+click for all of a type on screen</td></tr>
+    <tr><td>Command</td><td>Right-click: move, attack, gather (mine, tree, extractor), resume a building, set a rally point</td></tr>
+    <tr><td>Attack-move, Move, Stop, Hold</td><td><kbd>A</kbd> <kbd>M</kbd> <kbd>S</kbd> <kbd>H</kbd></td></tr>
+    <tr><td>Hero abilities</td><td><kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd>, then click a target</td></tr>
+    <tr><td>Workers</td><td><kbd>G</kbd> gather, <kbd>B</kbd> build, <kbd>V</kbd> advanced build, <kbd>R</kbd> return cargo</td></tr>
+    <tr><td>Buildings</td><td><kbd>Q</kbd> <kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> train, <kbd>A</kbd> <kbd>S</kbd> research, <kbd>T</kbd> rally, <kbd>H</kbd> revive hero, click a queued unit to cancel it</td></tr>
+    <tr><td>Camera</td><td>Arrow keys, screen edges, middle-drag, wheel to zoom, click the minimap</td></tr>
+    <tr><td>Groups</td><td><kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>9</kbd> to set, <kbd>1</kbd>–<kbd>9</kbd> to select, press twice to jump there</td></tr>
+    <tr><td>Shortcuts</td><td><kbd>F1</kbd> hero, <kbd>Backspace</kbd> hall, <kbd>Space</kbd> last alert, <kbd>P</kbd> pause, <kbd>Esc</kbd> cancel</td></tr>
+    <tr><td>Aether</td><td>Build your extractor on the geyser next to your base. Siege engines, flyers and spellcasters need it.</td></tr>
+    <tr><td>Creeps</td><td>Neutral camps guard the expansions and pay gold and hero experience. The Aether Wyrm guards the Great Geyser in the middle.</td></tr>
+  </table>
+</div></div>
+<div id="end"></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/",
+  "@displayxr/inline3d": "https://cdn.jsdelivr.net/npm/@displayxr/inline3d@1.45.1/js/inline3d.js",
+  "@displayxr/inline3d/three": "https://cdn.jsdelivr.net/npm/@displayxr/inline3d@1.45.1/js/inline3d-three.js"
+} }
+</script>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
